@@ -1,0 +1,10 @@
+[package]
+name = "freally-video"
+description = "Owned video codec + light video editor for Freally Snipper. Placeholder for Phase 5/6."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish = false
+
+[dependencies]

@@ -1,0 +1,10 @@
+[package]
+name = "freally-capture"
+description = "Screen capture (image) for Freally Snipper. Placeholder for Phase 1."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish = false
+
+[dependencies]

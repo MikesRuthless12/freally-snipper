@@ -1,0 +1,122 @@
+name: Release
+
+# Cut a version by pushing a tag, e.g.:  git tag v0.1.0 && git push origin v0.1.0
+# Builds the app on Windows/macOS/Linux, zips each, and opens a DRAFT GitHub Release
+# with the downloadable zips attached (you review, then click Publish).
+#
+# This is the foundation; Phase 7 upgrades it to signed installers (MSI / .dmg / AppImage).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version label for a manual test build (no Release is published)"
+        required: true
+        default: v0.0.0-test
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            bin: freally-snipper.exe
+          - os: macos-latest
+            bin: freally-snipper
+          - os: ubuntu-latest
+            bin: freally-snipper
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libgtk-3-dev \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libssl-dev libasound2-dev libdbus-1-dev
+
+      - name: Build release binary
+        run: cargo build --release --bin freally-snipper
+
+      - name: Resolve & validate version label
+        id: ver
+        shell: bash
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="$GITHUB_REF_NAME"
+          else
+            version="$INPUT_TAG"
+          fi
+          # Reject anything that isn't a clean vMAJOR.MINOR.PATCH[-suffix] tag
+          # (prevents path-traversal / shell-injection via the dispatch input).
+          if ! printf '%s' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$'; then
+            echo "::error::Refusing unsafe version '$version' (expected vMAJOR.MINOR.PATCH[-suffix])"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Package zip (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          stage="freally-snipper-${{ steps.ver.outputs.version }}-${{ runner.os }}"
+          mkdir -p "dist/$stage"
+          cp "target/release/${{ matrix.bin }}" "dist/$stage/"
+          cp README.md LICENSE THIRD-PARTY-NOTICES.md "dist/$stage/"
+          (cd dist && zip -r "$stage.zip" "$stage")
+
+      - name: Package zip (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $stage = "freally-snipper-${{ steps.ver.outputs.version }}-${{ runner.os }}"
+          New-Item -ItemType Directory -Force -Path "dist/$stage" | Out-Null
+          Copy-Item "target/release/${{ matrix.bin }}" "dist/$stage/"
+          Copy-Item README.md, LICENSE, THIRD-PARTY-NOTICES.md "dist/$stage/"
+          Compress-Archive -Path "dist/$stage" -DestinationPath "dist/$stage.zip" -Force
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: freally-snipper-${{ runner.os }}
+          path: dist/*.zip
+
+  release:
+    name: publish draft release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish draft GitHub Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: dist/*.zip
+          draft: true
+          generate_release_notes: true

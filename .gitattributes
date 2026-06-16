@@ -1,0 +1,10 @@
+# Normalize text files: store LF in the repo; check out platform-native by default.
+* text=auto
+
+# Shell scripts must be LF even when checked out on Windows (Phase 7 bootstrap scripts).
+*.sh text eol=lf
+
+# Binary assets — never normalize line endings.
+*.png binary
+*.ico binary
+*.icns binary
