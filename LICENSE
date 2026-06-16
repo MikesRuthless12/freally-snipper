@@ -1,0 +1,35 @@
+Freally Snipper — Proprietary License
+Copyright (c) 2026 Mike Weaver <mythodikalone@gmail.com>. All Rights Reserved.
+
+This software and its source code (the "Software") are the exclusive property of
+Mike Weaver (the "Owner"). The Software is proprietary and confidential.
+
+NO LICENSE IS GRANTED. Except where a separate written agreement signed by the
+Owner states otherwise, you are NOT permitted to:
+
+  1. copy, reproduce, or store the Software or its source code;
+  2. modify, adapt, translate, or create derivative works of the Software;
+  3. distribute, publish, sublicense, sell, rent, lease, or otherwise transfer
+     the Software or any copy of it;
+  4. reverse engineer, decompile, or disassemble any compiled form of the
+     Software, except to the extent this restriction is prohibited by law;
+  5. remove or alter any proprietary or attribution notices in the Software.
+
+USE OF BINARIES. Pre-built binaries of Freally Snipper, where made available by
+the Owner, may be downloaded and used free of charge for personal and commercial
+purposes. This permission to RUN the program grants no rights to the source code
+and transfers no ownership or intellectual-property rights.
+
+THIRD-PARTY COMPONENTS. The Software incorporates third-party components that are
+licensed separately under their own terms (see THIRD-PARTY-NOTICES.md). Those
+components remain governed by their respective licenses, and nothing in this
+license restricts any rights you may have under them.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE OWNER BE
+LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+For licensing inquiries, contact: mythodikalone@gmail.com

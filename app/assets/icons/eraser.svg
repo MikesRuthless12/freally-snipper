@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none">
+  <!-- Classic pink/blue eraser, angled to the RIGHT (blue working end on the right). -->
+  <g transform="rotate(18 12 12)">
+    <rect x="3.5" y="9" width="17" height="7.2" rx="1.8" fill="#F9A8D4"/>
+    <rect x="14.5" y="9" width="6" height="7.2" rx="1.8" fill="#60A5FA"/>
+    <rect x="3.5" y="9" width="17" height="2.6" rx="1.8" fill="#FFFFFF" opacity="0.35"/>
+  </g>
+</svg>

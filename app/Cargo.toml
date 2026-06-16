@@ -1,0 +1,29 @@
+[package]
+name = "freally-snipper"
+description = "Free, local-first, cross-platform screen capture + image & light video editor."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish = false
+
+[dependencies]
+directories = "6.0.0"
+eframe = "0.34.3"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+
+# --- Packaging (cargo-bundle): `cargo install cargo-bundle` then `cargo bundle --release` ---
+[package.metadata.bundle]
+name = "Freally Snipper"
+identifier = "com.havoc-software.freally-snipper"
+icon = ["assets/icon.png"]
+category = "Utility"
+short_description = "Free screen capture + image & light video editor."
+long_description = """
+Freally Snipper is a free, local-first, privacy-respecting screen capture tool with a built-in
+image editor and a light video editor for Windows, macOS, and Linux. No accounts, no cloud, no
+telemetry.
+"""
+copyright = "Copyright (c) 2026 Mike Weaver. All Rights Reserved."

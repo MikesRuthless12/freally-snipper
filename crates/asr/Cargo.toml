@@ -1,0 +1,10 @@
+[package]
+name = "freally-asr"
+description = "Optional local speech-to-text + caption translation for Freally Snipper. Placeholder for Phase 6."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish = false
+
+[dependencies]

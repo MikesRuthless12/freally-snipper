@@ -1,0 +1,25 @@
+# Rust build output
+/target/
+
+# rustc backup files
+**/*.rs.bk
+
+# Editor / IDE
+/.vscode/
+/.idea/
+*.swp
+*~
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Packaging output (cargo-bundle)
+/target/bundle/
+
+# NOTE: Cargo.lock IS committed — Freally Snipper ships a binary, so the lockfile
+# is part of the build (do not ignore it).
+
+# Private internal planning / spec docs — NEVER committed (kept local only).
+/product-roadmap.md
+/Build-Prompts-Guide.md

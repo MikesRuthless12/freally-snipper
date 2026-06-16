@@ -1,0 +1,10 @@
+[package]
+name = "freally-editor"
+description = "WYSIWYG image editor (Toolbar 2) for Freally Snipper. Placeholder for Phase 4."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish = false
+
+[dependencies]

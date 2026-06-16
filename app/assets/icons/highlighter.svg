@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none">
+  <!-- Yellow highlighter, writing toward the lower-RIGHT (original orientation). -->
+  <g transform="rotate(-45 12 12)">
+    <rect x="8.5" y="2.6" width="7" height="10.7" rx="1.6" fill="#FACC15"/>
+    <rect x="8.5" y="11.4" width="7" height="1.9" fill="#CA8A04"/>
+    <path d="M8.5 13.3 H15.5 L13.7 17.5 H10.3 Z" fill="#64748B"/>
+  </g>
+</svg>
