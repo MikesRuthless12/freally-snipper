@@ -8,19 +8,25 @@ All notable changes to Freally Snipper are documented here. The format is based 
 
 ## [0.19.84] — 2026-06-17 — Home window
 
-The Windows-11-style home window: a capture toolbar, a recent-captures gallery, full settings, an About panel, and an opt-in Print Screen takeover.
+The Windows-11-style home window, plus a system tray, an on-screen capture timer, a recent-captures gallery, full settings, an About panel, and the opt-in Print Screen takeover.
 
 ### Added
-- A toolbar (`+ New` · Camera · Video · Snippet ▾ · Timer ▾ · Color) starts a capture in the chosen mode after an optional 3/5/10 s timer.
-- A recent-captures strip shows thumbnails — decoded off-thread for no UI stutter — that reopen or reveal in their folder.
-- Settings cover the hotkey, save folder, image format, theme, default mode, and an 18-language UI picker (English first).
+- A toolbar (`+ New` · Camera · Video · Snippet ▾ · Timer ▾ · Color) starts a capture in the chosen mode.
+- With a Timer, you select the region first, then a center-screen countdown runs and the live screen is grabbed.
+- A recent-captures strip shows uniform thumbnails of the whole image, each with its date and time.
+- A system tray (Windows/macOS) keeps the hotkey working while the window is closed; click the tray icon to reopen.
+- Settings cover the hotkey, save folder, format, theme, default mode, timer, colour, an 18-language picker, a "show editor" toggle, and minimize-to-tray.
 - An About panel shows the version, ownership, project-start date, and the embedded license + third-party notices.
 - Opt-in "Open Freally Snipper with Print Screen" (P1.5): Windows frees the key via the registry and restores it on disable; macOS/Linux get guided remap steps.
-- First public release, so it also ships the Phase 1 capture core (rectangle / window / freeform / full-screen snips, global hotkey, clipboard + save).
+- First public milestone, so it also ships the Phase 1 capture core (rectangle / window / freeform / full-screen snips, global hotkey, clipboard + save).
 
 ### Changed
-- The app/window icon is now `Freally_Snipper_Icon_Dark.png`.
+- App/window icon is `Freally_Snipper_Icon_Light.png`, auto-trimmed to fill the canvas; the tray icon is pre-scaled for a crisp fit.
 - Version set to 0.19.84 — the first step on the release ladder to v1.0.0.
+
+### Fixed
+- Freeform saved to JPG composites the outside over white instead of leaking the masked-out pixels into a full rectangle (PNG keeps it transparent).
+- The Freeform outline draws in the toolbar's active colour.
 
 ## [0.1.0] — 2026-06-16 — Foundation
 

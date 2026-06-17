@@ -20,6 +20,8 @@ require. Trademarks belong to their respective owners; listing here does not imp
 | [`rfd`](https://crates.io/crates/rfd) | native "save folder" picker + Print-Screen consent dialog | MIT |
 | [`opener`](https://crates.io/crates/opener) | open a saved capture / its folder in the OS default app | MIT OR Apache-2.0 |
 | [`winreg`](https://crates.io/crates/winreg) *(Windows only)* | opt-in Print Screen key takeover via the registry (P1.5) | MIT |
+| [`tray-icon`](https://crates.io/crates/tray-icon) *(Windows/macOS only)* | system-tray icon + menu (minimize-to-tray) | MIT OR Apache-2.0 |
+| [`chrono`](https://crates.io/crates/chrono) | local date/time formatting (recent-capture timestamps) | MIT OR Apache-2.0 |
 | [`serde`](https://serde.rs) / [`serde_json`](https://crates.io/crates/serde_json) | settings (de)serialization | MIT OR Apache-2.0 |
 | [`directories`](https://crates.io/crates/directories) | OS config/data paths | MIT OR Apache-2.0 |
 | [`log`](https://crates.io/crates/log) | logging facade (capture crate) | MIT OR Apache-2.0 |
