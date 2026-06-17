@@ -5,11 +5,13 @@ for **Windows, macOS, and Linux** — in the spirit of the Windows 11 Snipping T
 ScreenToGif, but **free, local-first, and privacy-respecting** (no accounts, no cloud, no
 telemetry).
 
-> **Status:** Phase 2 (Home window) — a Win11-style capture toolbar (New · Camera · Video ·
-> Snippet ▾ · Timer ▾ · Color), an on-screen capture timer (select → countdown → live grab), a
-> recent-captures gallery with dates, a **system tray** (Windows/macOS), full settings (hotkey,
-> save folder, format, theme, 18-language picker, editor toggle), an About panel, and an opt-in
-> Print Screen takeover. Builds on the Phase 1 capture core and Phase 0 foundation.
+> **Status:** Phase 3 (Capture overlay action bar) — a top-center action bar on the capture overlay
+> (Camera · Video · Snippet ▾ · Markup · Text Extractor · Color · ✕) that switches the selection
+> shape **live, mid-capture**, sets the markup colour, and — with **Markup** on — hands the snip to
+> an editor preview centered below the selection (Save / Discard); the bar hides while you drag so
+> it's never in the shot. Builds on the Phase 2 home window (Win11-style toolbar, capture timer,
+> recent-captures gallery, system tray, settings, About panel, Print Screen takeover), the Phase 1
+> capture core, and the Phase 0 foundation.
 
 > **🔒 No bundled AI models — full transparency.** Capture and image/video editing work **100%
 > offline**. The **optional** speech-to-text, translation, and dubbing features use third-party AI
@@ -64,12 +66,15 @@ on the home window. The window hides and the screen freezes under a dimmed selec
 - **Full screen** — captures every monitor at once.
 - **Esc** cancels.
 
-Pick the mode from **Snippet ▾**. With **Timer ▾** (3 / 5 / 10 s) you select the region first, then a
-center-screen countdown runs and the **live** screen is grabbed — so you can arrange the screen during
-the delay (Timer Off captures immediately). Each capture is **copied to the clipboard** and **saved** to
-your save folder (default `Pictures/Freally Snipper`), and appears as a dated **thumbnail** on the home
-window — click it to open in your OS viewer (the in-app editor arrives in Phase 4). Turn on **minimize to
-system tray** to keep the hotkey working while the window is closed.
+Pick the mode from **Snippet ▾** — on the home window, or live from the overlay's top-center **action
+bar**, which also sets the markup **Color** and (via **Markup**) opens a finished snip in an editor
+preview centered below the selection (**Save** / **Discard**) instead of saving straight away; the bar
+hides while you drag so it's never in the shot. With **Timer ▾** (3 / 5 / 10 s) you select the region
+first, then a center-screen countdown runs and the **live** screen is grabbed — so you can arrange the
+screen during the delay (Timer Off captures immediately). Each capture is **copied to the clipboard** and
+**saved** to your save folder (default `Pictures/Freally Snipper`), and appears as a dated **thumbnail**
+on the home window — click it to open in your OS viewer (the full markup tools, Toolbar 2, arrive in
+Phase 4). Turn on **minimize to system tray** to keep the hotkey working while the window is closed.
 
 ## Develop
 
@@ -105,7 +110,7 @@ which builds the app on all three OSes, **zips each**, and opens a **draft GitHu
 downloadable zips (you review, then publish):
 
 ```sh
-git tag v0.19.84 && git push origin v0.19.84
+git tag v0.30.0 && git push origin v0.30.0
 ```
 
 Signed/notarized installers (MSI / .dmg / AppImage) and auto-update arrive in
