@@ -8,7 +8,7 @@ require. Trademarks belong to their respective owners; listing here does not imp
 > Third-party components are kept **behind interfaces** so an owned implementation can replace them
 > later. This list grows as later phases add dependencies.
 
-## Currently bundled / linked (through Phase 1)
+## Currently bundled / linked (through Phase 2)
 
 | Component | Role | License |
 |-----------|------|---------|
@@ -17,7 +17,9 @@ require. Trademarks belong to their respective owners; listing here does not imp
 | [`image`](https://crates.io/crates/image) | image encode/decode (capture, save, icon) | MIT OR Apache-2.0 |
 | [`global-hotkey`](https://crates.io/crates/global-hotkey) | system-wide capture hotkey | Apache-2.0 OR MIT |
 | [`arboard`](https://crates.io/crates/arboard) | clipboard image copy | MIT OR Apache-2.0 |
-| [`rfd`](https://crates.io/crates/rfd) | native "save folder" picker dialog | MIT |
+| [`rfd`](https://crates.io/crates/rfd) | native "save folder" picker + Print-Screen consent dialog | MIT |
+| [`opener`](https://crates.io/crates/opener) | open a saved capture / its folder in the OS default app | MIT OR Apache-2.0 |
+| [`winreg`](https://crates.io/crates/winreg) *(Windows only)* | opt-in Print Screen key takeover via the registry (P1.5) | MIT |
 | [`serde`](https://serde.rs) / [`serde_json`](https://crates.io/crates/serde_json) | settings (de)serialization | MIT OR Apache-2.0 |
 | [`directories`](https://crates.io/crates/directories) | OS config/data paths | MIT OR Apache-2.0 |
 | [`log`](https://crates.io/crates/log) | logging facade (capture crate) | MIT OR Apache-2.0 |

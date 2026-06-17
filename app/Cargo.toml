@@ -21,12 +21,18 @@ serde_json = "1.0.150"
 global-hotkey = "0.8.0"
 arboard = "3.6.1"
 rfd = "0.17.2"
+opener = "0.7.2"
+
+# Windows-only: free the Print Screen key from the built-in Snipping Tool (P1.5),
+# via the safe `winreg` wrapper so the crate stays `#![forbid(unsafe_code)]`.
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52.0"
 
 # --- Packaging (cargo-bundle): `cargo install cargo-bundle` then `cargo bundle --release` ---
 [package.metadata.bundle]
 name = "Freally Snipper"
 identifier = "com.havoc-software.freally-snipper"
-icon = ["assets/icon.png"]
+icon = ["assets/Freally_Snipper_Icon_Dark.png"]
 category = "Utility"
 short_description = "Free screen capture + image & light video editor."
 long_description = """

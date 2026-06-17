@@ -35,6 +35,13 @@ remediate before any public disclosure.
   `Pictures/Freally Snipper`); filenames are program-generated (no path-traversal input). The
   global capture hotkey is registered with the OS and chosen from a fixed preset list. No `unsafe`
   code is used (`#![forbid(unsafe_code)]`).
+- **Home window (Phase 2):** the recent-captures gallery opens a saved file or its folder only via
+  the OS default handler (`opener`), at your click. The opt-in **Print Screen** takeover changes a
+  single **per-user** registry value (`HKCU\Control Panel\Keyboard\PrintScreenKeyForSnippingEnabled`)
+  — only after an explicit consent dialog — and restores the prior value when disabled; it never
+  touches machine-wide (`HKLM`) settings. That registry access uses the safe `winreg` wrapper, so
+  the app stays `#![forbid(unsafe_code)]`. The UI-language setting is stored locally and sends
+  nothing anywhere.
 - **Third-party components** (see [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) carry their own
   advisories; we track and update them, and intend to run `cargo audit` / `cargo deny` in CI as the
   project matures.

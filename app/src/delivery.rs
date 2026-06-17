@@ -22,17 +22,24 @@ struct Job {
     format: ImageFormat,
 }
 
+/// The outcome of one delivery: a human-readable status line plus, on a
+/// successful save, the file path (so the home-window gallery can record it).
+pub struct DeliveryResult {
+    pub message: String,
+    pub saved_path: Option<PathBuf>,
+}
+
 /// Handle to the delivery worker thread.
 pub struct Delivery {
     jobs: Sender<Job>,
-    results: Receiver<String>,
+    results: Receiver<DeliveryResult>,
 }
 
 impl Delivery {
     /// Start the worker. `ctx` is used to wake the UI when a delivery finishes.
     pub fn new(ctx: &egui::Context) -> Self {
         let (jobs_tx, jobs_rx) = std::sync::mpsc::channel::<Job>();
-        let (results_tx, results_rx) = std::sync::mpsc::channel::<String>();
+        let (results_tx, results_rx) = std::sync::mpsc::channel::<DeliveryResult>();
         let ctx = ctx.clone();
         let spawned = std::thread::Builder::new()
             .name("freally-delivery".to_owned())
@@ -61,14 +68,15 @@ impl Delivery {
         }
     }
 
-    /// Non-blocking: the most recent finished-delivery status line, if any.
-    pub fn poll_status(&self) -> Option<String> {
-        // Drain anything queued; the newest message wins.
-        self.results.try_iter().last()
+    /// Non-blocking: drain every finished delivery since the last call. All
+    /// results are returned (not just the newest) so no saved path is lost from
+    /// the gallery when two captures finish within one frame.
+    pub fn poll(&self) -> Vec<DeliveryResult> {
+        self.results.try_iter().collect()
     }
 }
 
-fn worker(jobs: &Receiver<Job>, results: &Sender<String>, ctx: &egui::Context) {
+fn worker(jobs: &Receiver<Job>, results: &Sender<DeliveryResult>, ctx: &egui::Context) {
     // Created once and kept alive for the thread's lifetime (Linux clipboard
     // serving depends on this instance staying alive).
     let mut clipboard = match arboard::Clipboard::new() {
@@ -98,12 +106,18 @@ fn worker(jobs: &Receiver<Job>, results: &Sender<String>, ctx: &egui::Context) {
             "Clipboard unavailable · "
         };
 
-        let message = match output::save_capture(&job.image, &job.folder, job.format) {
-            Ok(path) => format!("{prefix}saved {w} × {h} to {}", path.display()),
-            Err(err) => format!("{prefix}could not save file: {err}"),
+        let result = match output::save_capture(&job.image, &job.folder, job.format) {
+            Ok(path) => DeliveryResult {
+                message: format!("{prefix}saved {w} × {h} to {}", path.display()),
+                saved_path: Some(path),
+            },
+            Err(err) => DeliveryResult {
+                message: format!("{prefix}could not save file: {err}"),
+                saved_path: None,
+            },
         };
 
-        let _ = results.send(message);
+        let _ = results.send(result);
         ctx.request_repaint();
     }
 }
