@@ -26,6 +26,7 @@ mod filters;
 mod objects;
 mod raster;
 mod text;
+mod transforms;
 
 use std::collections::HashMap;
 
@@ -91,6 +92,10 @@ enum Tool {
     Text,
     /// Place a watermark (low-opacity text) object (P4.4).
     Watermark,
+    /// Pick a colour from the image (P4.6).
+    Eyedropper,
+    /// Drag a rectangle to crop the image (P4.6).
+    Crop,
 }
 
 impl Tool {
@@ -108,6 +113,19 @@ impl Tool {
 enum Edit {
     Raster(RgbaImage),
     Objects(Vec<Object>),
+    /// Both layers at once — for transforms that flatten objects into the raster.
+    Both(RgbaImage, Vec<Object>),
+}
+
+/// A one-shot transform action chosen from the Transform ▾ menu (P4.6).
+#[derive(Clone, Copy)]
+enum TxAction {
+    RotateCw,
+    RotateCcw,
+    FlipH,
+    FlipV,
+    Bevel(u32),
+    Crop,
 }
 
 /// What a primary-button drag on the canvas is doing (Select / Shape tools).
@@ -238,6 +256,8 @@ pub struct EditorSession {
     obj_drag: ObjDrag,
     /// Whether the current object gesture has already pushed its undo snapshot.
     obj_undo_pushed: bool,
+    /// In-progress crop rectangle (image space): (drag start, current).
+    crop_drag: Option<(Pos2, Pos2)>,
     /// Undo / redo history (raster image or object-list snapshots).
     undo: Vec<Edit>,
     redo: Vec<Edit>,
@@ -289,6 +309,7 @@ impl EditorSession {
             selected: None,
             obj_drag: ObjDrag::None,
             obj_undo_pushed: false,
+            crop_drag: None,
             undo: Vec::new(),
             redo: Vec::new(),
             notice: None,
@@ -376,6 +397,7 @@ impl EditorSession {
     fn tool_strip(&mut self, ui: &mut egui::Ui) {
         ui.add_space(2.0);
         let mut chosen_filter: Option<Filter> = None;
+        let mut chosen_tx: Option<TxAction> = None;
         ui.horizontal_wrapped(|ui| {
             self.tool_button(
                 ui,
@@ -442,24 +464,64 @@ impl EditorSession {
             })
             .response
             .on_hover_text("Apply a live, undoable filter to the image");
-            disabled_tool(
+            // Transform ▾ — rotate / flip / bevel / crop (P4.6).
+            ui.menu_button("Transform ▾", |ui| {
+                if ui.button("Rotate left").clicked() {
+                    chosen_tx = Some(TxAction::RotateCcw);
+                    ui.close();
+                }
+                if ui.button("Rotate right").clicked() {
+                    chosen_tx = Some(TxAction::RotateCw);
+                    ui.close();
+                }
+                if ui.button("Flip horizontal").clicked() {
+                    chosen_tx = Some(TxAction::FlipH);
+                    ui.close();
+                }
+                if ui.button("Flip vertical").clicked() {
+                    chosen_tx = Some(TxAction::FlipV);
+                    ui.close();
+                }
+                ui.separator();
+                ui.menu_button("Bevel", |ui| {
+                    if ui.button("Thin").clicked() {
+                        chosen_tx = Some(TxAction::Bevel(8));
+                        ui.close();
+                    }
+                    if ui.button("Medium").clicked() {
+                        chosen_tx = Some(TxAction::Bevel(16));
+                        ui.close();
+                    }
+                    if ui.button("Thick").clicked() {
+                        chosen_tx = Some(TxAction::Bevel(28));
+                        ui.close();
+                    }
+                });
+                ui.separator();
+                if ui.button("Crop…").clicked() {
+                    chosen_tx = Some(TxAction::Crop);
+                    ui.close();
+                }
+            })
+            .response
+            .on_hover_text("Rotate, flip, bevel, or crop");
+            self.tool_button(
                 ui,
-                "Transform",
-                "Rotate / crop / bevel — arrives in Phase 4 (P4.6)",
-            );
-            disabled_tool(
-                ui,
+                Tool::Eyedropper,
                 "Eyedropper",
-                "Pick a colour — arrives in Phase 4 (P4.6)",
+                "Pick a colour from the image",
             );
             disabled_tool(
                 ui,
                 "Extract Text",
-                "OCR the image to the clipboard — arrives in Phase 4 (P4.6)",
+                "OCR the image to the clipboard — arrives in Phase 4 (P4.6b)",
             );
         });
         if let Some(filter) = chosen_filter {
             self.apply_filter(filter);
+        }
+        if let Some(action) = chosen_tx {
+            self.apply_tx(action);
         }
         ui.add_space(2.0);
         ui.separator();
@@ -516,6 +578,12 @@ impl EditorSession {
                 });
             }
             Tool::Text | Tool::Watermark => self.text_defaults_ui(ui),
+            Tool::Eyedropper => {
+                ui.label(egui::RichText::new("Click a pixel to set the markup colour").weak());
+            }
+            Tool::Crop => {
+                ui.label(egui::RichText::new("Drag a rectangle, then release to crop").weak());
+            }
             _ => self.raster_options(ui),
         }
     }
@@ -830,6 +898,17 @@ impl EditorSession {
             objects::draw_selection(&painter, obj, &to_screen, HANDLE_PX);
         }
 
+        // Crop rectangle preview (P4.6).
+        if let Some((a, b)) = self.crop_drag {
+            let r = Rect::from_two_pos(to_screen(a), to_screen(b));
+            painter.rect_stroke(
+                r,
+                0.0,
+                Stroke::new(2.0, Color32::from_rgb(40, 140, 255)),
+                StrokeKind::Outside,
+            );
+        }
+
         self.draw_stroke_preview(&painter, canvas);
         self.draw_cursor_ring(&painter, canvas, &response);
     }
@@ -847,6 +926,8 @@ impl EditorSession {
             Tool::Select => self.handle_select(response, pointer),
             Tool::Shape(kind) => self.handle_shape(response, kind, pointer),
             Tool::Text | Tool::Watermark => self.handle_text_tool(response, pointer),
+            Tool::Eyedropper => self.handle_eyedropper(response, pointer),
+            Tool::Crop => self.handle_crop(response, pointer),
             _ => self.handle_raster(response, pointer),
         }
     }
@@ -1062,7 +1143,12 @@ impl EditorSession {
                 EraseMode::White => Paint::White,
                 EraseMode::MarkupOnly => Paint::Restore,
             },
-            Tool::Select | Tool::Shape(_) | Tool::Text | Tool::Watermark => return None,
+            Tool::Select
+            | Tool::Shape(_)
+            | Tool::Text
+            | Tool::Watermark
+            | Tool::Eyedropper
+            | Tool::Crop => return None,
         })
     }
 
@@ -1073,7 +1159,12 @@ impl EditorSession {
             Tool::Brush => self.brush_width,
             Tool::Highlighter => self.hl_width,
             Tool::Eraser => self.eraser_width,
-            Tool::Select | Tool::Shape(_) | Tool::Text | Tool::Watermark => 0.0,
+            Tool::Select
+            | Tool::Shape(_)
+            | Tool::Text
+            | Tool::Watermark
+            | Tool::Eyedropper
+            | Tool::Crop => 0.0,
         }
     }
 
@@ -1085,7 +1176,12 @@ impl EditorSession {
             Tool::Brush => self.brush_width = width,
             Tool::Highlighter => self.hl_width = width,
             Tool::Eraser => self.eraser_width = width,
-            Tool::Select | Tool::Shape(_) | Tool::Text | Tool::Watermark => {}
+            Tool::Select
+            | Tool::Shape(_)
+            | Tool::Text
+            | Tool::Watermark
+            | Tool::Eyedropper
+            | Tool::Crop => {}
         }
     }
 
@@ -1153,6 +1249,11 @@ impl EditorSession {
         self.push_undo(Edit::Objects(self.objects.clone()));
     }
 
+    /// Snapshot both layers before a transform that flattens objects (P4.6).
+    fn push_full_undo(&mut self) {
+        self.push_undo(Edit::Both(self.image.clone(), self.objects.clone()));
+    }
+
     fn push_undo(&mut self, edit: Edit) {
         self.undo.push(edit);
         if self.undo.len() > MAX_UNDO {
@@ -1190,6 +1291,15 @@ impl EditorSession {
                 self.selected = None; // the old index may no longer be valid
                 Edit::Objects(current)
             }
+            Edit::Both(image, objects) => {
+                let prev_img = std::mem::replace(&mut self.image, image);
+                let prev_objs = std::mem::replace(&mut self.objects, objects);
+                self.selected = None;
+                self.text_cache.clear();
+                self.view.initialized = false; // re-fit (dimensions may have changed)
+                self.reupload();
+                Edit::Both(prev_img, prev_objs)
+            }
         }
     }
 
@@ -1199,6 +1309,99 @@ impl EditorSession {
         self.image = filter.apply(&self.image);
         self.reupload();
         self.notice = None;
+    }
+
+    /// Apply a transform menu action (P4.6). Crop just arms the Crop tool.
+    fn apply_tx(&mut self, action: TxAction) {
+        match action {
+            TxAction::RotateCw => self.apply_geometry(transforms::rotate_cw),
+            TxAction::RotateCcw => self.apply_geometry(transforms::rotate_ccw),
+            TxAction::FlipH => self.apply_geometry(transforms::flip_h),
+            TxAction::FlipV => self.apply_geometry(transforms::flip_v),
+            TxAction::Bevel(width) => {
+                // Bevel frames the photo under the objects — no flatten needed.
+                self.push_raster_undo();
+                self.image = transforms::bevel(&self.image, width);
+                self.reupload();
+                self.notice = None;
+            }
+            TxAction::Crop => self.tool = Tool::Crop,
+        }
+    }
+
+    /// Flatten + geometrically transform the raster as one atomic undo step.
+    /// Objects are baked in first (their coordinate space changes), so this is a
+    /// `Both` edit.
+    fn apply_geometry(&mut self, f: impl Fn(&RgbaImage) -> RgbaImage) {
+        self.push_full_undo();
+        self.flatten_objects_into_image();
+        self.image = f(&self.image);
+        self.selected = None;
+        self.text_cache.clear();
+        self.view.initialized = false; // re-fit (dimensions may have changed)
+        self.reupload();
+        self.notice = None;
+    }
+
+    /// Bake every overlay object into the raster and clear the object list.
+    fn flatten_objects_into_image(&mut self) {
+        for obj in &self.objects {
+            obj.bake_into(&mut self.image);
+        }
+        self.objects.clear();
+    }
+
+    /// Crop the raster to the image-space rectangle (flattening objects first).
+    fn apply_crop(&mut self, x: i32, y: i32, w: u32, h: u32) {
+        if w < 2 || h < 2 {
+            return;
+        }
+        self.push_full_undo();
+        self.flatten_objects_into_image();
+        self.image = transforms::crop(&self.image, x, y, w, h);
+        self.selected = None;
+        self.text_cache.clear();
+        self.view.initialized = false;
+        self.reupload();
+        self.notice = None;
+    }
+
+    /// Eyedropper tool: a click sets the active markup colour from the pixel under
+    /// the cursor (keeps the current opacity), and shows its hex.
+    fn handle_eyedropper(&mut self, response: &egui::Response, pointer: Option<Pos2>) {
+        if !response.clicked_by(PointerButton::Primary) {
+            return;
+        }
+        let Some(p) = pointer else { return };
+        let (x, y) = (p.x.floor() as i32, p.y.floor() as i32);
+        if x < 0 || y < 0 || x as u32 >= self.image.width() || y as u32 >= self.image.height() {
+            return;
+        }
+        let px = self.image.get_pixel(x as u32, y as u32).0;
+        self.color = [px[0], px[1], px[2], self.color[3]];
+        self.notice = Some(format!("Picked #{:02X}{:02X}{:02X}", px[0], px[1], px[2]));
+    }
+
+    /// Crop tool: drag a rectangle, then crop to it on release.
+    fn handle_crop(&mut self, response: &egui::Response, pointer: Option<Pos2>) {
+        if response.drag_started_by(PointerButton::Primary) {
+            self.crop_drag = pointer.map(|p| (p, p));
+        } else if response.dragged_by(PointerButton::Primary) {
+            if let (Some(drag), Some(p)) = (self.crop_drag.as_mut(), pointer) {
+                drag.1 = p;
+            }
+        } else if response.drag_stopped_by(PointerButton::Primary) {
+            if let Some((a, b)) = self.crop_drag.take() {
+                let r = Rect::from_two_pos(a, b);
+                self.apply_crop(
+                    r.min.x.round() as i32,
+                    r.min.y.round() as i32,
+                    r.width().round() as u32,
+                    r.height().round() as u32,
+                );
+                self.tool = Tool::Select;
+            }
+        }
     }
 
     /// Render/cache each text object's stamp (by content) and keep its bounds in
