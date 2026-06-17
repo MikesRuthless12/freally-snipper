@@ -21,3 +21,14 @@ freally-capture = { path = "../capture" }
 # both previewed on-screen and baked on Save — so they match exactly.
 rustybuzz = "0.20"
 ab_glyph = "0.2"
+# Image objects (P4.8): decode user-picked images. Same `image` 0.25 as `xcap`
+# (re-exported by freally-capture), so the `RgbaImage` type unifies — no skew.
+# Features add the decoders the prompt lists (WebP included).
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "jpeg",
+    "bmp",
+    "webp",
+] }
+# Native file picker for choosing an image (same crate the app uses).
+rfd = "0.17"

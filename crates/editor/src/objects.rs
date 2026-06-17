@@ -9,8 +9,10 @@
 //! opposite corners; for Line/Arrow they are the two endpoints; for Text, `a` is
 //! the top-left and `b = a + rendered size`.
 
+use std::rc::Rc;
+
 use egui::{Color32, Pos2, Rect, Stroke, StrokeKind, Vec2};
-use freally_capture::image::RgbaImage;
+use freally_capture::image::{imageops, RgbaImage};
 
 use crate::raster;
 use crate::text::{self, FontFamily};
@@ -58,11 +60,21 @@ pub struct TextData {
     pub size: (u32, u32),
 }
 
+/// Image object data (P4.8) — a placed image, scaled to the object's bounds.
+#[derive(Clone)]
+pub struct ImageData {
+    /// Stable id for the editor's texture cache (survives undo/redo).
+    pub id: u64,
+    /// Source pixels, shared (`Rc`) so cloning for undo snapshots is cheap.
+    pub source: Rc<RgbaImage>,
+}
+
 /// What an [`Object`] is.
 #[derive(Clone)]
 pub enum Kind {
     Shape(ShapeKind),
     Text(TextData),
+    Image(ImageData),
 }
 
 /// A movable, selectable, resizable overlay object.
@@ -80,11 +92,11 @@ pub struct Object {
 }
 
 impl Object {
-    /// The shape kind, or `None` for a text object.
+    /// The shape kind, or `None` for a text/image object.
     fn shape_kind(&self) -> Option<ShapeKind> {
         match self.kind {
             Kind::Shape(s) => Some(s),
-            Kind::Text(_) => None,
+            _ => None,
         }
     }
 
@@ -92,7 +104,7 @@ impl Object {
     pub fn text(&self) -> Option<&TextData> {
         match &self.kind {
             Kind::Text(t) => Some(t),
-            Kind::Shape(_) => None,
+            _ => None,
         }
     }
 
@@ -100,8 +112,24 @@ impl Object {
     pub fn text_mut(&mut self) -> Option<&mut TextData> {
         match &mut self.kind {
             Kind::Text(t) => Some(t),
-            Kind::Shape(_) => None,
+            _ => None,
         }
+    }
+
+    /// The image data, if this is an image object.
+    pub fn image(&self) -> Option<&ImageData> {
+        match &self.kind {
+            Kind::Image(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    /// Whether this object resizes as an axis-aligned box (Rect/Oval/Image).
+    fn is_box_like(&self) -> bool {
+        matches!(
+            self.kind,
+            Kind::Shape(ShapeKind::Rect | ShapeKind::Oval) | Kind::Image(_)
+        )
     }
 
     /// Axis-aligned bounding rectangle (image space).
@@ -115,13 +143,10 @@ impl Object {
         self.b += delta;
     }
 
-    /// Selection-handle positions (image space): box corners for Rect/Oval, the two
-    /// endpoints for Line/Arrow, none for Text (resize via the size property).
+    /// Selection-handle positions (image space): box corners for Rect/Oval/Image,
+    /// the two endpoints for Line/Arrow, none for Text (resize via the size property).
     pub fn handles(&self) -> Vec<Pos2> {
-        let Some(kind) = self.shape_kind() else {
-            return Vec::new();
-        };
-        if kind.is_box() {
+        if self.is_box_like() {
             let r = self.bounds();
             vec![
                 r.left_top(),
@@ -129,17 +154,17 @@ impl Object {
                 r.right_bottom(),
                 r.left_bottom(),
             ]
-        } else {
+        } else if matches!(self.kind, Kind::Shape(ShapeKind::Line | ShapeKind::Arrow)) {
             vec![self.a, self.b]
+        } else {
+            Vec::new() // Text
         }
     }
 
-    /// Drag handle `i` to `to`, resizing or moving the endpoint (shapes only).
+    /// Drag handle `i` to `to`, resizing a box (Rect/Oval/Image) or moving a
+    /// Line/Arrow endpoint.
     pub fn drag_handle(&mut self, i: usize, to: Pos2) {
-        let Some(kind) = self.shape_kind() else {
-            return;
-        };
-        if kind.is_box() {
+        if self.is_box_like() {
             let r = self.bounds();
             let (mut left, mut top, mut right, mut bottom) =
                 (r.left(), r.top(), r.right(), r.bottom());
@@ -195,19 +220,49 @@ impl Object {
         }
     }
 
-    /// Bake the object into `image` (Save flattening). Text is re-rendered and
-    /// composited; shapes are rasterized.
+    /// The image source resized to the object's bounds, with its opacity applied
+    /// (the bake path; the preview tints the GPU texture instead).
+    fn scaled_image(&self, d: &ImageData) -> RgbaImage {
+        let b = self.bounds();
+        let bw = b.width().round().max(1.0) as u32;
+        let bh = b.height().round().max(1.0) as u32;
+        let mut scaled =
+            imageops::resize(d.source.as_ref(), bw, bh, imageops::FilterType::Triangle);
+        let op = self.color[3] as u16;
+        if op < 255 {
+            for px in scaled.pixels_mut() {
+                px.0[3] = (px.0[3] as u16 * op / 255) as u8;
+            }
+        }
+        scaled
+    }
+
+    /// Bake the object into `image` (Save flattening). Text is re-rendered, images
+    /// are scaled + composited, shapes are rasterized.
     pub fn bake_into(&self, image: &mut RgbaImage) {
         let Some(kind) = self.shape_kind() else {
-            if let Kind::Text(t) = &self.kind {
-                if let Some(stamp) = text::render(&t.string, t.font_px, t.family, self.color) {
+            match &self.kind {
+                Kind::Text(t) => {
+                    if let Some(stamp) = text::render(&t.string, t.font_px, t.family, self.color) {
+                        raster::blit_over(
+                            image,
+                            &stamp,
+                            self.a.x.round() as i32,
+                            self.a.y.round() as i32,
+                        );
+                    }
+                }
+                Kind::Image(d) => {
+                    let stamp = self.scaled_image(d);
+                    let b = self.bounds();
                     raster::blit_over(
                         image,
                         &stamp,
-                        self.a.x.round() as i32,
-                        self.a.y.round() as i32,
+                        b.min.x.round() as i32,
+                        b.min.y.round() as i32,
                     );
                 }
+                Kind::Shape(_) => {}
             }
             return;
         };
@@ -479,5 +534,24 @@ mod tests {
         txt.bake_into(&mut img);
         // Some pixel changed from white (text ink landed).
         assert!(img.pixels().any(|p| p.0 != [255, 255, 255, 255]));
+    }
+
+    #[test]
+    fn image_object_is_box_like_and_bakes_scaled() {
+        let source = Rc::new(RgbaImage::from_pixel(2, 2, Rgba([0, 200, 0, 255])));
+        let obj = Object {
+            kind: Kind::Image(ImageData { id: 0, source }),
+            a: Pos2::new(2.0, 2.0),
+            b: Pos2::new(8.0, 8.0),
+            color: [255, 255, 255, 255],
+            width: 0.0,
+            fill: false,
+        };
+        assert_eq!(obj.handles().len(), 4); // resizable like a box
+        assert!(obj.hit(Pos2::new(5.0, 5.0), 1.0)); // whole box hittable
+        let mut img = RgbaImage::from_pixel(12, 12, Rgba([255, 255, 255, 255]));
+        obj.bake_into(&mut img);
+        assert_eq!(img.get_pixel(5, 5).0, [0, 200, 0, 255]); // scaled green baked in
+        assert_eq!(img.get_pixel(0, 0).0, [255, 255, 255, 255]); // outside untouched
     }
 }

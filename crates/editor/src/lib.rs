@@ -29,11 +29,12 @@ mod text;
 mod transforms;
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use egui::{Color32, PointerButton, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
 use freally_capture::image::RgbaImage;
 
-use objects::{Kind, Object, ShapeKind, TextData};
+use objects::{ImageData, Kind, Object, ShapeKind, TextData};
 use raster::Paint;
 use text::FontFamily;
 
@@ -246,6 +247,10 @@ pub struct EditorSession {
     text_family: FontFamily,
     /// Rendered text stamps + textures, keyed by content (string/size/family/colour).
     text_cache: HashMap<String, CachedText>,
+    /// Source textures for image objects (P4.8), keyed by the object's stable id.
+    image_textures: HashMap<u64, egui::TextureHandle>,
+    /// Next id to hand to a new image object.
+    next_image_id: u64,
     /// In-progress stroke points, in image-pixel coordinates (empty = idle).
     stroke: Vec<Pos2>,
     /// Movable overlay objects (P4.3), drawn over the raster, baked on Save.
@@ -304,6 +309,8 @@ impl EditorSession {
             text_px: 48.0,
             text_family: FontFamily::Sans,
             text_cache: HashMap::new(),
+            image_textures: HashMap::new(),
+            next_image_id: 0,
             stroke: Vec::new(),
             objects: Vec::new(),
             selected: None,
@@ -398,6 +405,7 @@ impl EditorSession {
         ui.add_space(2.0);
         let mut chosen_filter: Option<Filter> = None;
         let mut chosen_tx: Option<TxAction> = None;
+        let mut want_image = false;
         ui.horizontal_wrapped(|ui| {
             self.tool_button(
                 ui,
@@ -451,7 +459,13 @@ impl EditorSession {
                 "Emoji",
                 "Emoji picker (colour) — arrives in Phase 4 (P4.7)",
             );
-            disabled_tool(ui, "Image", "Place an image — arrives in Phase 4 (P4.8)");
+            if ui
+                .button("Image")
+                .on_hover_text("Place an image (PNG / JPG / BMP / WebP)")
+                .clicked()
+            {
+                want_image = true;
+            }
             ui.separator();
             // Filters ▾ — live, undoable image filters (P4.5).
             ui.menu_button("Filters ▾", |ui| {
@@ -523,6 +537,9 @@ impl EditorSession {
         if let Some(action) = chosen_tx {
             self.apply_tx(action);
         }
+        if want_image {
+            self.insert_image();
+        }
         ui.add_space(2.0);
         ui.separator();
         self.tool_options(ui);
@@ -548,6 +565,8 @@ impl EditorSession {
             Tool::Select => {
                 if self.selected_is_text() {
                     self.text_props_ui(ui);
+                } else if self.selected_is_image() {
+                    self.image_props_ui(ui);
                 } else {
                     ui.label(
                         egui::RichText::new(
@@ -593,6 +612,44 @@ impl EditorSession {
         self.selected
             .and_then(|i| self.objects.get(i))
             .is_some_and(|o| o.text().is_some())
+    }
+
+    /// Whether the selected object is an image object.
+    fn selected_is_image(&self) -> bool {
+        self.selected
+            .and_then(|i| self.objects.get(i))
+            .is_some_and(|o| o.image().is_some())
+    }
+
+    /// Live editor for the selected image object: opacity + exact x/y/w/h (P4.8).
+    fn image_props_ui(&mut self, ui: &mut egui::Ui) {
+        let Some(i) = self.selected else { return };
+        if self.objects.get(i).and_then(|o| o.image()).is_none() {
+            return;
+        }
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Opacity");
+            let mut alpha = self.objects[i].color[3];
+            if ui.add(egui::Slider::new(&mut alpha, 0..=255)).changed() {
+                self.objects[i].color[3] = alpha;
+            }
+            ui.separator();
+            let b = self.objects[i].bounds();
+            let (mut x, mut y, mut w, mut h) = (b.min.x, b.min.y, b.width(), b.height());
+            let mut changed = false;
+            ui.label("X");
+            changed |= ui.add(egui::DragValue::new(&mut x).speed(1.0)).changed();
+            ui.label("Y");
+            changed |= ui.add(egui::DragValue::new(&mut y).speed(1.0)).changed();
+            ui.label("W");
+            changed |= ui.add(egui::DragValue::new(&mut w).speed(1.0)).changed();
+            ui.label("H");
+            changed |= ui.add(egui::DragValue::new(&mut h).speed(1.0)).changed();
+            if changed {
+                self.objects[i].a = egui::pos2(x, y);
+                self.objects[i].b = egui::pos2(x + w.max(1.0), y + h.max(1.0));
+            }
+        });
     }
 
     /// Defaults shown while a text/watermark tool is armed (applied to new text).
@@ -849,9 +906,10 @@ impl EditorSession {
             PAN_KEEP,
         );
 
-        // Render/cache text stamps and keep their bounds in sync before drawing.
+        // Render/cache text stamps + image textures and keep bounds in sync.
         let ctx = ui.ctx().clone();
         self.sync_text(&ctx);
+        self.sync_images(&ctx);
 
         // Paint, clipped to the canvas.
         let painter = ui.painter_at(canvas);
@@ -890,6 +948,18 @@ impl EditorSession {
                         rect,
                         Rect::from_min_max(Pos2::ZERO, egui::pos2(1.0, 1.0)),
                         Color32::WHITE,
+                    );
+                }
+            }
+            // Image objects: draw the source texture scaled to bounds, opacity-tinted.
+            if let Some(d) = obj.image() {
+                if let Some(tex) = self.image_textures.get(&d.id) {
+                    let rect = Rect::from_two_pos(to_screen(obj.a), to_screen(obj.b));
+                    painter.image(
+                        tex.id(),
+                        rect,
+                        Rect::from_min_max(Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                        Color32::from_white_alpha(obj.color[3]),
                     );
                 }
             }
@@ -1400,6 +1470,75 @@ impl EditorSession {
                     r.height().round() as u32,
                 );
                 self.tool = Tool::Select;
+            }
+        }
+    }
+
+    /// Pick an image file and drop it as a centred, selected overlay object (P4.8).
+    fn insert_image(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Images", &["png", "jpg", "jpeg", "bmp", "webp"])
+            .pick_file()
+        else {
+            return;
+        };
+        let src = match image::open(&path) {
+            Ok(img) => img.to_rgba8(),
+            Err(err) => {
+                self.notice = Some(format!("Couldn't open image: {err}"));
+                return;
+            }
+        };
+        if src.width() == 0 || src.height() == 0 {
+            return;
+        }
+        // Place centred, scaled to fit within half the image (never upscaled).
+        let (iw, ih) = (self.image.width() as f32, self.image.height() as f32);
+        let (sw, sh) = (src.width() as f32, src.height() as f32);
+        let scale = (iw * 0.5 / sw).min(ih * 0.5 / sh).min(1.0);
+        let size = egui::vec2(sw * scale, sh * scale);
+        let a = egui::pos2((iw - size.x) * 0.5, (ih - size.y) * 0.5);
+        let id = self.next_image_id;
+        self.next_image_id += 1;
+        self.push_objects_undo();
+        self.objects.push(Object {
+            kind: Kind::Image(ImageData {
+                id,
+                source: Rc::new(src),
+            }),
+            a,
+            b: a + size,
+            color: [255, 255, 255, 255], // opacity lives in the alpha
+            width: 0.0,
+            fill: false,
+        });
+        self.selected = Some(self.objects.len() - 1);
+        self.tool = Tool::Select;
+        self.notice = None;
+    }
+
+    /// Upload source textures for image objects (by id) and drop dead ones.
+    fn sync_images(&mut self, ctx: &egui::Context) {
+        let live: Vec<u64> = self
+            .objects
+            .iter()
+            .filter_map(|o| o.image().map(|d| d.id))
+            .collect();
+        self.image_textures.retain(|id, _| live.contains(id));
+        for obj in &self.objects {
+            if let Some(d) = obj.image() {
+                self.image_textures.entry(d.id).or_insert_with(|| {
+                    let src = d.source.as_ref();
+                    let img = egui::ColorImage::from_rgba_unmultiplied(
+                        [src.width() as usize, src.height() as usize],
+                        src.as_raw(),
+                    );
+                    ctx.load_texture(
+                        format!("freally_img_{}", d.id),
+                        img,
+                        egui::TextureOptions::LINEAR,
+                    )
+                });
             }
         }
     }
