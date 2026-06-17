@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 freally-capture = { path = "../crates/capture" }
+freally-editor = { path = "../crates/editor" }
 directories = "6.0.0"
 eframe = "0.34.3"
 image = { version = "0.25.10", default-features = false, features = [

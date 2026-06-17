@@ -1,6 +1,6 @@
 [package]
 name = "freally-editor"
-description = "WYSIWYG image editor (Toolbar 2) for Freally Snipper. Placeholder for Phase 4."
+description = "WYSIWYG image editor (Toolbar 2) for Freally Snipper."
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -8,3 +8,50 @@ license-file.workspace = true
 publish = false
 
 [dependencies]
+# `egui` 0.34 unifies with the version `eframe` pulls in (the app uses
+# eframe 0.34.3), so the editor shares one `egui` type set with the host — no
+# duplicate-crate skew on `Context` / `TextureHandle` / `ColorImage`.
+egui = "0.34"
+# Re-uses the capture crate's `RgbaImage` (and its pinned `image` version), so
+# the captured frame flows into the editor with no conversion or version skew.
+freally-capture = { path = "../capture" }
+# Text rendering (P4.4): `rustybuzz` (MIT) shapes runs incl. Arabic joining;
+# `ab_glyph` (MIT/Apache) rasterizes the shaped glyph outlines. Both parse the
+# bundled Noto TTFs (OFL). Used to render text objects to a CPU "stamp" that is
+# both previewed on-screen and baked on Save — so they match exactly.
+rustybuzz = "0.20"
+ab_glyph = "0.2"
+# Image objects (P4.8): decode user-picked images. Same `image` 0.25 as `xcap`
+# (re-exported by freally-capture), so the `RgbaImage` type unifies — no skew.
+# Features add the decoders the prompt lists (WebP included).
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "jpeg",
+    "bmp",
+    "webp",
+] }
+# Native file picker for choosing an image (same crate the app uses).
+rfd = "0.17"
+# OCR (P4.6b): `ocrs` + `rten` are pure-Rust (MIT) — no Tesseract C++ system deps.
+# Recognition/detection models download on demand (not bundled), so the build
+# stays light. `ureq` (rustls, pure-Rust) fetches models; `directories` locates
+# the cache dir (same crate the app uses).
+ocrs = "0.12"
+rten = "0.24"
+ureq = "3"
+directories = "6"
+# Emoji objects (P4.7): `swash` (MIT/Apache) rasterizes COLR/CBDT colour glyphs
+# from Noto Color Emoji (OFL, downloaded on demand); `emojis` (MIT) is the
+# searchable emoji database. A picked emoji is rendered to a colour bitmap and
+# dropped as an Image object (reuses P4.8 placement/resize/bake).
+swash = "0.2"
+emojis = "0.8"
+# Translate-as-you-type (P4.9): MADLAD-400 (Apache-2.0) is a T5 model → run it
+# locally on CPU via candle (pure-Rust ML, MIT/Apache). Weights + tokenizer
+# download on demand (~3 GB), not bundled. `tokenizers` (Apache) does the
+# SentencePiece tokenization.
+candle-core = "0.10"
+candle-nn = "0.10"
+candle-transformers = "0.10"
+tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
+serde_json = "1"

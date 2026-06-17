@@ -18,7 +18,6 @@ use freally_capture::image::RgbaImage;
 use freally_capture::{Composite, Rect as VRect, WindowInfo};
 
 use crate::delivery::Delivery;
-use crate::editor::{EditorOutcome, EditorSession};
 use crate::gallery::Gallery;
 use crate::hotkey::Hotkeys;
 use crate::overlay::{apply_selection, OverlayOutcome, OverlaySession, Selection};
@@ -27,6 +26,7 @@ use crate::settings::{
     language_label, ImageFormat, Settings, SnippetMode, Theme, TimerDelay, UI_LANGUAGES,
 };
 use crate::tray::{Tray, TrayCommand};
+use freally_editor::{EditorOutcome, EditorSession};
 
 /// Delay between hiding the home window and grabbing the screen, so the window is
 /// actually gone from the shot before the snapshot is taken. The user's Timer ▾
@@ -97,9 +97,9 @@ enum CaptureState {
     },
     /// Selection overlay is live with a frozen snapshot.
     Active(Box<OverlaySession>),
-    /// Post-capture editor hand-off (Toolbar 2 shell, P3.2): the capture is shown
-    /// centered below the selection with Save / Discard, hosted in the overlay
-    /// window. Reached only when Markup is armed (else the capture saves directly).
+    /// Post-capture image editor (Toolbar 2, P4.1): the capture is shown on a
+    /// zoom/pan canvas in a decorated editor window with Save / Copy / Discard.
+    /// Reached only when Markup is armed (else the capture saves directly).
     Editing(Box<EditorSession>),
     /// A visible countdown badge is showing before the *live* snapshot (Timer ▾).
     /// `selection` is `None` for full screen (re-grab the whole desktop) or the
@@ -126,6 +126,7 @@ impl FreallySnipperApp {
         cc: &eframe::CreationContext<'_>,
         mut settings: Settings,
         icon: Option<egui::IconData>,
+        minimized: bool,
     ) -> Self {
         apply_theme(&cc.egui_ctx, settings.theme);
 
@@ -158,9 +159,17 @@ impl FreallySnipperApp {
         // System tray (Windows/macOS) reuses the app icon, but pre-scaled to a
         // small, crisp square — Windows renders the tray slot at ~16–32px, and
         // letting it crush the full-res icon there looks distorted/blurry.
+        // When launched `--minimized` (start-at-login), show the tray so the
+        // hidden window can be reopened, even if minimize-to-tray is off.
         let tray = icon.and_then(|icon| {
             let (rgba, w, h) = tray_icon_rgba(&icon, 64);
-            Tray::new(&cc.egui_ctx, rgba, w, h, settings.minimize_to_tray)
+            Tray::new(
+                &cc.egui_ctx,
+                rgba,
+                w,
+                h,
+                settings.minimize_to_tray || minimized,
+            )
         });
 
         let app = Self {
@@ -176,7 +185,9 @@ impl FreallySnipperApp {
             needs_persist: false,
             tray,
             quitting: false,
-            hidden_to_tray: false,
+            // Launched minimized → the window starts hidden (NativeOptions), so a
+            // hotkey capture returns to the tray instead of popping it open.
+            hidden_to_tray: minimized,
         };
         if pruned {
             app.persist();
@@ -361,8 +372,7 @@ impl FreallySnipperApp {
         match capture_desktop() {
             Ok((composite, windows)) => {
                 if mode == SnippetMode::FullScreen {
-                    let desktop = composite.bounds;
-                    self.deliver_or_edit(ctx, composite.into_image(), None, desktop, markup);
+                    self.deliver_or_edit(ctx, composite.into_image(), markup);
                 } else {
                     let bounds = composite.bounds;
                     let session = OverlaySession::new(
@@ -398,14 +408,12 @@ impl FreallySnipperApp {
         };
         match capture_desktop() {
             Ok((composite, _windows)) => {
-                let desktop = composite.bounds;
-                let region = selection.as_ref().map(Selection::bbox);
                 let image = match &selection {
                     Some(sel) => apply_selection(&composite, sel),
                     None => Some(composite.into_image()),
                 };
                 match image {
-                    Some(img) => self.deliver_or_edit(ctx, img, region, desktop, markup),
+                    Some(img) => self.deliver_or_edit(ctx, img, markup),
                     None => self.fail(ctx, "Selection produced no image.".to_owned()),
                 }
             }
@@ -413,35 +421,27 @@ impl FreallySnipperApp {
         }
     }
 
-    /// Route a finished capture: open the editor (Toolbar 2 shell) anchored below
-    /// the selection when Markup is armed, otherwise hand straight to delivery
-    /// (clipboard + save) exactly as before. `region` anchors the editor card;
-    /// `desktop` is the host desktop bounds.
-    fn deliver_or_edit(
-        &mut self,
-        ctx: &egui::Context,
-        image: RgbaImage,
-        region: Option<VRect>,
-        desktop: VRect,
-        markup: bool,
-    ) {
+    /// Route a finished capture: open the image editor (Toolbar 2, P4.1) when
+    /// Markup is armed, otherwise hand straight to delivery (clipboard + save)
+    /// exactly as before.
+    fn deliver_or_edit(&mut self, ctx: &egui::Context, image: RgbaImage, markup: bool) {
         // No editor, or an empty crop (let `finish` report it) → straight to save.
         if !markup || image.width() == 0 || image.height() == 0 {
             self.finish(ctx, Some(image));
             return;
         }
-        let session = EditorSession::new(ctx, image, region, (desktop.x, desktop.y));
-        // Host the editor in the full-desktop overlay window so the card can anchor
-        // to the on-screen selection (the immediate path is already morphed; the
-        // timed path returns here from a hidden window).
-        morph_to_overlay(ctx, desktop);
+        let session = EditorSession::new(ctx, image, self.settings.active_color);
+        // Reshape the single OS window into a decorated, centered editor window
+        // (the immediate path arrives here as the full-desktop overlay; the timed
+        // path arrives from a hidden window).
+        morph_to_editor(ctx);
         self.capture = CaptureState::Editing(Box::new(session));
         ctx.request_repaint();
     }
 
     /// Draw the overlay into the (now full-desktop) window and act on the result.
     fn overlay_ui(&mut self, ui: &mut egui::Ui) {
-        let (outcome, markup, new_color, desktop) = match &mut self.capture {
+        let (outcome, markup, new_color) = match &mut self.capture {
             CaptureState::Active(session) => {
                 let mut out = session.ui(ui);
                 if ui.input(|i| i.viewport().close_requested()) {
@@ -451,12 +451,7 @@ impl FreallySnipperApp {
                         .send_viewport_cmd(egui::ViewportCommand::CancelClose);
                     out = OverlayOutcome::Cancelled;
                 }
-                (
-                    out,
-                    session.markup(),
-                    session.active_color(),
-                    session.desktop_bounds(),
-                )
+                (out, session.markup(), session.active_color())
             }
             _ => return,
         };
@@ -478,8 +473,8 @@ impl FreallySnipperApp {
         match outcome {
             OverlayOutcome::Active => ctx.request_repaint(),
             OverlayOutcome::Cancelled => self.finish(&ctx, None),
-            OverlayOutcome::Captured { image, region } => {
-                self.deliver_or_edit(&ctx, image, Some(region), desktop, markup);
+            OverlayOutcome::Captured { image } => {
+                self.deliver_or_edit(&ctx, image, markup);
             }
             // Timer set: selection chosen, now run the countdown then grab live.
             OverlayOutcome::Selected(selection) => {
@@ -516,6 +511,18 @@ impl FreallySnipperApp {
                 {
                     self.finish(&ctx, Some(session.into_image()));
                 }
+            }
+            // Copy the current image to the clipboard and keep editing — routed
+            // through the delivery worker, which owns the clipboard for its life
+            // (needed for X11/Wayland persistence).
+            EditorOutcome::Copy => {
+                if let CaptureState::Editing(session) = &self.capture {
+                    self.delivery.copy(session.flatten());
+                }
+            }
+            // OCR text → clipboard (P4.6b), via the same worker.
+            EditorOutcome::CopyText(text) => {
+                self.delivery.copy_text(text);
             }
             EditorOutcome::Discard => {
                 self.finish(&ctx, None);
@@ -775,8 +782,8 @@ impl FreallySnipperApp {
     }
 
     /// Horizontal strip of recent-capture thumbnails (P2.2). Clicking a tile
-    /// opens it in the OS default viewer (the in-app editor arrives in Phase 4);
-    /// right-click offers Open / Show in folder / Remove.
+    /// opens it in the OS default viewer; right-click offers Open / Show in
+    /// folder / Remove.
     fn recent_strip(&mut self, ui: &mut egui::Ui) {
         if self.settings.recent_captures.is_empty() {
             ui.label(egui::RichText::new("Your recent captures will appear here.").weak());
@@ -1014,9 +1021,10 @@ impl FreallySnipperApp {
                 if ui
                     .checkbox(&mut show_editor, "Show the capture editor after capturing")
                     .on_hover_text(
-                        "Open the editor below each capture (Save / Discard) instead of saving \
+                        "Open each capture in the image editor (Toolbar 2 — markup, text, shapes, \
+                         emoji, filters, transforms, OCR, and translation) instead of saving \
                          straight away. You can also toggle this per-capture with Markup on the \
-                         capture bar. The full Toolbar 2 markup tools arrive in Phase 4.",
+                         capture bar.",
                     )
                     .changed()
                 {
@@ -1024,8 +1032,8 @@ impl FreallySnipperApp {
                     *dirty = true;
                 }
                 ui.small(
-                    "Markup tools (Toolbar 2) arrive in Phase 4; for now the editor shows a \
-                     Save / Discard preview.",
+                    "The editor opens in its own window — Save writes exactly what you see \
+                     (Save / Copy / Discard, Undo / Redo).",
                 );
 
                 ui.add_space(10.0);
@@ -1052,6 +1060,40 @@ impl FreallySnipperApp {
                 if !tray_available {
                     ui.small("System tray runs on Windows and macOS; Linux support arrives in Phase 7.");
                 }
+
+                // Start at login (P4.10) — a reversible per-user autostart entry.
+                ui.add_space(8.0);
+                let mut start_at_login = self.settings.start_at_login;
+                if ui
+                    .checkbox(&mut start_at_login, "Start Freally Snipper when I sign in")
+                    .on_hover_text(
+                        "Launch at sign-in, minimized to the tray, so the hotkey / Print Screen \
+                         work any time without opening the window. Reversible — NOT an OS service.",
+                    )
+                    .changed()
+                {
+                    match crate::autostart::apply(start_at_login) {
+                        Ok(()) => {
+                            self.settings.start_at_login = start_at_login;
+                            *dirty = true;
+                            self.status = Some(
+                                if start_at_login {
+                                    "Freally Snipper will start (minimized) when you sign in."
+                                } else {
+                                    "Removed start-at-login."
+                                }
+                                .to_owned(),
+                            );
+                        }
+                        Err(err) => {
+                            self.status = Some(format!("Couldn't update start-at-login: {err}"));
+                        }
+                    }
+                }
+                ui.small(
+                    "Starts minimized to the tray. On Linux the tray arrives in Phase 7, so it \
+                     starts hidden — reopen with the hotkey.",
+                );
 
                 ui.add_space(12.0);
                 ui.separator();
@@ -1235,7 +1277,7 @@ fn draw_thumb(gallery: &mut Gallery, ui: &mut egui::Ui, path: &Path) -> bool {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string());
-    let hover = format!("{name}\n{when}\nOpen (the in-app editor arrives in Phase 4)");
+    let hover = format!("{name}\n{when}\nClick to open in your default viewer");
 
     let mut clicked = false;
     ui.vertical_centered(|ui| {
@@ -1344,6 +1386,35 @@ fn morph_to_overlay(ctx: &egui::Context, bounds: VRect) {
     ));
     ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
     ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
+    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+}
+
+/// Comfortable editor-window size (points) for the canvas + Toolbar 2, clamped so
+/// it always fits on the monitor.
+fn editor_size(ctx: &egui::Context) -> egui::Vec2 {
+    let target = egui::vec2(1100.0, 760.0);
+    match ctx.input(|i| i.viewport().monitor_size) {
+        Some(m) => egui::vec2(target.x.min(m.x * 0.92), target.y.min(m.y * 0.92)),
+        None => target,
+    }
+}
+
+/// Reshape the single OS window into a decorated, centered editor window for the
+/// Toolbar 2 image editor (P4.1). Reverses [`morph_to_overlay`]: a normal,
+/// decorated, resizable window the user can move and resize while editing.
+fn morph_to_editor(ctx: &egui::Context) {
+    let size = editor_size(ctx);
+    let pos = ctx
+        .input(|i| i.viewport().monitor_size)
+        .map(|m| egui::pos2((m.x - size.x) * 0.5, (m.y - size.y) * 0.5))
+        .unwrap_or(egui::pos2(120.0, 80.0));
+    ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
+        egui::WindowLevel::Normal,
+    ));
+    ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(true));
+    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
+    ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
 }

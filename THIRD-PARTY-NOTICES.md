@@ -33,6 +33,33 @@ Transitive Rust dependencies are MIT / Apache-2.0 / BSD / Zlib / MPL. Verify the
 > uses **PipeWire** for capture, so a Linux build links `libpipewire`, `libwayland`, `libxcb`, and
 > related system libraries (see `README.md` for the full `apt` list).
 
+## Phase 4 — image editor (Toolbar 2)
+
+**Bundled (compiled in):**
+
+| Component | Role | License |
+|-----------|------|---------|
+| [`rustybuzz`](https://crates.io/crates/rustybuzz) | text shaping (incl. Arabic joining) | MIT |
+| [`ab_glyph`](https://crates.io/crates/ab_glyph) | glyph rasterization | Apache-2.0 OR MIT |
+| [Noto Sans / Serif / Mono / Sans Arabic](https://fonts.google.com/noto) | bundled text-object fonts | SIL OFL 1.1 |
+| [`swash`](https://crates.io/crates/swash) | colour-glyph (COLR/CBDT) rasterization for emoji | MIT OR Apache-2.0 |
+| [`emojis`](https://crates.io/crates/emojis) | emoji database for the searchable picker | MIT OR Apache-2.0 |
+| [`ocrs`](https://crates.io/crates/ocrs) + [`rten`](https://crates.io/crates/rten) | OCR engine ("Extract Text") — pure-Rust | MIT |
+| [`candle-core` / `-nn` / `-transformers`](https://github.com/huggingface/candle) | on-device ML runtime (T5 translate) | MIT OR Apache-2.0 |
+| [`tokenizers`](https://crates.io/crates/tokenizers) | SentencePiece tokenization (translate) | Apache-2.0 |
+| [`ureq`](https://crates.io/crates/ureq) | on-demand model/font downloads (rustls TLS) | MIT OR Apache-2.0 |
+
+**Downloaded on demand** (not bundled; fetched to the OS cache on first use):
+
+| Component | Role | License |
+|-----------|------|---------|
+| [ocrs models](https://github.com/robertknight/ocrs-models) (detection / recognition) | OCR (P4.6b) | Apache-2.0 |
+| [Noto Color Emoji](https://github.com/googlefonts/noto-emoji) | colour emoji rendering (P4.7) | SIL OFL 1.1 |
+| [MADLAD-400-3B-mt](https://huggingface.co/jbochi/madlad400-3b-mt) | machine translation, ~400 languages (P4.9) | Apache-2.0 |
+
+Downloads are over TLS from the hosts above; the MADLAD weights are pinned to an immutable
+revision. See [`SECURITY.md`](SECURITY.md) for the download-integrity posture.
+
 ## Planned components (later phases — listed now for licensing clarity)
 
 | Component | Role | License | Notes |

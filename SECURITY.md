@@ -50,6 +50,17 @@ remediate before any public disclosure.
   (no path-traversal input). The **Video** and **Text Extractor (OCR)** buttons are inert
   placeholders (no capture, no recognition, no network) until their phases land. No new dependencies
   were added, and the app stays `#![forbid(unsafe_code)]`.
+- **Image editor (Phase 4):** all editing — markup, text, shapes, emoji, filters, transforms, OCR,
+  and translation — runs **locally and in-memory**; nothing is uploaded. The only network actions are
+  **optional, explicit model downloads** for the OCR (ocrs), colour-emoji (Noto Color Emoji), and
+  translation (MADLAD-400) add-ons, fetched on first use (or from the in-app **Models** panel) into
+  your per-user cache. **Integrity:** downloads are over **TLS** from fixed, hardcoded hosts; target
+  filenames are **hardcoded literals** (no path-traversal input); each file is streamed to a temp path
+  and **atomically renamed**; the ~3 GB **MADLAD weights are pinned to an immutable revision** so they
+  can't silently change. **Tracked hardening:** per-file **SHA-256 pinning** — TLS authenticates the
+  host, not the bytes. The translate add-on loads weights via one **`unsafe` memory-map** (required by
+  `candle`) of a file the app just wrote into its own cache; the rest of the editor crate, and the
+  whole app binary, remain `#![forbid(unsafe_code)]`.
 - **Third-party components** (see [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) carry their own
   advisories; we track and update them, and intend to run `cargo audit` / `cargo deny` in CI as the
   project matures.
