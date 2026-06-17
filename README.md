@@ -5,7 +5,9 @@ for **Windows, macOS, and Linux** — in the spirit of the Windows 11 Snipping T
 ScreenToGif, but **free, local-first, and privacy-respecting** (no accounts, no cloud, no
 telemetry).
 
-> **Status:** Phase 0 (Foundation) — workspace, app shell, settings, CI, and packaging scaffold.
+> **Status:** Phase 1 (Capture core) — multi-monitor screenshots, the selection overlay
+> (Rectangle / Window / Freeform / Full screen), a global hotkey, and copy-to-clipboard +
+> save-to-file. (Phase 0 delivered the workspace, app shell, settings, CI, and packaging.)
 
 > **🔒 No bundled AI models — full transparency.** Capture and image/video editing work **100%
 > offline**. The **optional** speech-to-text, translation, and dubbing features use third-party AI
@@ -30,12 +32,16 @@ public issue).
 ## Requirements
 
 - [Rust](https://rustup.rs) (stable; pinned via `rust-toolchain.toml`).
-- **Linux only** — system libraries for the GUI/window stack:
+- **Linux only** — system libraries for the GUI, screen capture (`xcap`), and the
+  folder picker (`rfd`):
   ```sh
   sudo apt-get install -y \
-    libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
-    pkg-config libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
-    libxkbcommon-dev libxkbcommon-x11-dev libssl-dev libasound2-dev libdbus-1-dev
+    pkg-config libgtk-3-dev \
+    libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+    libxcb1-dev libxrandr-dev \
+    libxkbcommon-dev libxkbcommon-x11-dev \
+    libssl-dev libasound2-dev libdbus-1-dev \
+    libclang-dev libpipewire-0.3-dev libwayland-dev libegl-dev
   ```
 
 ## Build & run
@@ -44,6 +50,21 @@ public issue).
 cargo run                 # prints the version banner, then opens the home window
 cargo build --release     # optimized build -> target/release/freally-snipper
 ```
+
+## Capturing
+
+Press the global hotkey (**`Ctrl+Shift+S`** by default) from anywhere, or click **`+ New`**
+on the home window. The window hides and the screen freezes under a dimmed selection overlay:
+
+- **Rectangle** — drag a box.
+- **Window** — hover to highlight the window under the cursor, then click to grab it.
+- **Freeform** — draw a lasso; everything outside the path becomes transparent.
+- **Full screen** — captures every monitor at once.
+- **Esc** cancels.
+
+Each capture is **copied to the clipboard** and **saved** to your save folder (default
+`Pictures/Freally Snipper`; change it with **Settings → Save folder → Change…**). The capture
+hotkey and default snippet mode are also configurable in Settings.
 
 ## Develop
 

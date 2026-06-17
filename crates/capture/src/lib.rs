@@ -132,6 +132,12 @@ impl Composite {
     pub fn origin(&self) -> (i32, i32) {
         (self.bounds.x, self.bounds.y)
     }
+
+    /// Consume the composite and return the stitched image (no copy). Useful for
+    /// a full-desktop capture, where the whole composite *is* the result.
+    pub fn into_image(self) -> RgbaImage {
+        self.image
+    }
 }
 
 /// A top-level OS window, for the "Window" capture mode's hit-testing.
@@ -312,7 +318,11 @@ pub fn list_windows() -> Result<Vec<WindowInfo>> {
         if w.is_minimized().unwrap_or(false) {
             continue;
         }
-        let (width, height) = (w.width().unwrap_or(0), w.height().unwrap_or(0));
+        // Skip any window whose geometry can't be read fully — defaulting a
+        // missing position to (0, 0) would put a phantom hit-box at the origin.
+        let (Ok(x), Ok(y), Ok(width), Ok(height)) = (w.x(), w.y(), w.width(), w.height()) else {
+            continue;
+        };
         if width == 0 || height == 0 {
             continue;
         }
@@ -320,7 +330,7 @@ pub fn list_windows() -> Result<Vec<WindowInfo>> {
             id: w.id().unwrap_or(0),
             title: w.title().unwrap_or_default(),
             app_name: w.app_name().unwrap_or_default(),
-            bounds: Rect::new(w.x().unwrap_or(0), w.y().unwrap_or(0), width, height),
+            bounds: Rect::new(x, y, width, height),
         });
     }
     Ok(out)
