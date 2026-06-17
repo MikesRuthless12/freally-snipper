@@ -24,12 +24,14 @@
 
 mod filters;
 mod objects;
+mod ocr;
 mod raster;
 mod text;
 mod transforms;
 
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::mpsc::Receiver;
 
 use egui::{Color32, PointerButton, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
 use freally_capture::image::RgbaImage;
@@ -74,6 +76,8 @@ pub enum EditorOutcome {
     Save,
     /// Copy the current (flattened) image to the clipboard; keep editing.
     Copy,
+    /// Copy this text to the clipboard (OCR result, P4.6b); keep editing.
+    CopyText(String),
     /// Throw the capture away and return home.
     Discard,
 }
@@ -251,6 +255,10 @@ pub struct EditorSession {
     image_textures: HashMap<u64, egui::TextureHandle>,
     /// Next id to hand to a new image object.
     next_image_id: u64,
+    /// Receiver for an in-flight OCR job (P4.6b), or `None` when idle.
+    ocr_rx: Option<Receiver<Result<String, String>>>,
+    /// OCR text waiting to be handed to the app for the clipboard.
+    pending_text_copy: Option<String>,
     /// In-progress stroke points, in image-pixel coordinates (empty = idle).
     stroke: Vec<Pos2>,
     /// Movable overlay objects (P4.3), drawn over the raster, baked on Save.
@@ -311,6 +319,8 @@ impl EditorSession {
             text_cache: HashMap::new(),
             image_textures: HashMap::new(),
             next_image_id: 0,
+            ocr_rx: None,
+            pending_text_copy: None,
             stroke: Vec::new(),
             objects: Vec::new(),
             selected: None,
@@ -383,6 +393,9 @@ impl EditorSession {
             self.delete_selected();
         }
 
+        // Reflect any finished OCR job.
+        self.poll_ocr();
+
         let mut outcome = EditorOutcome::Active;
         egui::Panel::top("freally_toolbar2")
             .resizable(false)
@@ -395,6 +408,14 @@ impl EditorSession {
                 }
             });
         egui::CentralPanel::default().show_inside(ui, |ui| self.canvas(ui));
+
+        // Hand any completed OCR text to the app for the clipboard (only when no
+        // other action fired this frame).
+        if matches!(outcome, EditorOutcome::Active) {
+            if let Some(text) = self.pending_text_copy.take() {
+                outcome = EditorOutcome::CopyText(text);
+            }
+        }
         outcome
     }
 
@@ -406,6 +427,8 @@ impl EditorSession {
         let mut chosen_filter: Option<Filter> = None;
         let mut chosen_tx: Option<TxAction> = None;
         let mut want_image = false;
+        let mut want_ocr = false;
+        let ocr_running = self.ocr_rx.is_some();
         ui.horizontal_wrapped(|ui| {
             self.tool_button(
                 ui,
@@ -525,11 +548,15 @@ impl EditorSession {
                 "Eyedropper",
                 "Pick a colour from the image",
             );
-            disabled_tool(
-                ui,
-                "Extract Text",
-                "OCR the image to the clipboard — arrives in Phase 4 (P4.6b)",
-            );
+            if ocr_running {
+                disabled_tool(ui, "Extracting…", "Running OCR — extracting text");
+            } else if ui
+                .button("Extract Text")
+                .on_hover_text("OCR the image and copy the text to the clipboard")
+                .clicked()
+            {
+                want_ocr = true;
+            }
         });
         if let Some(filter) = chosen_filter {
             self.apply_filter(filter);
@@ -539,6 +566,10 @@ impl EditorSession {
         }
         if want_image {
             self.insert_image();
+        }
+        if want_ocr {
+            let ctx = ui.ctx().clone();
+            self.start_ocr(&ctx);
         }
         ui.add_space(2.0);
         ui.separator();
@@ -1470,6 +1501,55 @@ impl EditorSession {
                     r.height().round() as u32,
                 );
                 self.tool = Tool::Select;
+            }
+        }
+    }
+
+    /// Start OCR on the current raster on a worker thread (P4.6b). The first run
+    /// downloads the models; the result is handed to the app for the clipboard.
+    fn start_ocr(&mut self, ctx: &egui::Context) {
+        if self.ocr_rx.is_some() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let image = self.image.clone();
+        let ctx = ctx.clone();
+        let spawned = std::thread::Builder::new()
+            .name("freally-ocr".to_owned())
+            .spawn(move || {
+                let _ = tx.send(ocr::extract_text(&image));
+                ctx.request_repaint();
+            });
+        if spawned.is_ok() {
+            self.ocr_rx = Some(rx);
+            self.notice = Some("Extracting text… (first run downloads the OCR models)".to_owned());
+        } else {
+            self.notice = Some("Couldn't start the OCR worker.".to_owned());
+        }
+    }
+
+    /// Poll the OCR worker; on completion, queue the text for the clipboard.
+    fn poll_ocr(&mut self) {
+        let Some(rx) = &self.ocr_rx else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok(result) => {
+                self.ocr_rx = None;
+                match result {
+                    Ok(text) if !text.trim().is_empty() => {
+                        let n = text.chars().count();
+                        self.pending_text_copy = Some(text);
+                        self.notice = Some(format!("Extracted text — copied {n} characters"));
+                    }
+                    Ok(_) => self.notice = Some("No text found in the image.".to_owned()),
+                    Err(err) => self.notice = Some(format!("OCR failed: {err}")),
+                }
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.ocr_rx = None;
+                self.notice = Some("OCR worker stopped unexpectedly.".to_owned());
             }
         }
     }

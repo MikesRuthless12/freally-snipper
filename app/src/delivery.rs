@@ -25,6 +25,8 @@ enum Job {
     },
     /// Copy an image to the clipboard only (the editor's Copy action) — no save.
     Copy { image: RgbaImage },
+    /// Copy text to the clipboard (the editor's Extract-Text / OCR action).
+    CopyText(String),
 }
 
 /// The outcome of one delivery: a human-readable status line plus, on a
@@ -81,6 +83,13 @@ impl Delivery {
         }
     }
 
+    /// Queue text for a clipboard copy (the editor's Extract-Text / OCR action).
+    pub fn copy_text(&self, text: String) {
+        if self.jobs.send(Job::CopyText(text)).is_err() {
+            eprintln!("Freally Snipper: delivery worker is gone; text not copied");
+        }
+    }
+
     /// Non-blocking: drain every finished delivery since the last call. All
     /// results are returned (not just the newest) so no saved path is lost from
     /// the gallery when two captures finish within one frame.
@@ -132,6 +141,27 @@ fn worker(jobs: &Receiver<Job>, results: &Sender<DeliveryResult>, ctx: &egui::Co
                 },
                 saved_path: None,
             },
+            Job::CopyText(text) => {
+                let count = text.chars().count();
+                let ok = match clipboard.as_mut() {
+                    Some(cb) => match cb.set_text(text) {
+                        Ok(()) => true,
+                        Err(err) => {
+                            eprintln!("Freally Snipper: clipboard text copy failed: {err}");
+                            false
+                        }
+                    },
+                    None => false,
+                };
+                DeliveryResult {
+                    message: if ok {
+                        format!("Copied {count} characters to the clipboard")
+                    } else {
+                        "Clipboard unavailable.".to_owned()
+                    },
+                    saved_path: None,
+                }
+            }
         };
 
         let _ = results.send(result);

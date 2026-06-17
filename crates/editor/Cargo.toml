@@ -32,3 +32,11 @@ image = { version = "0.25", default-features = false, features = [
 ] }
 # Native file picker for choosing an image (same crate the app uses).
 rfd = "0.17"
+# OCR (P4.6b): `ocrs` + `rten` are pure-Rust (MIT) — no Tesseract C++ system deps.
+# Recognition/detection models download on demand (not bundled), so the build
+# stays light. `ureq` (rustls, pure-Rust) fetches models; `directories` locates
+# the cache dir (same crate the app uses).
+ocrs = "0.12"
+rten = "0.24"
+ureq = "3"
+directories = "6"

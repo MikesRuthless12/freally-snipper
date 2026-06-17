@@ -520,6 +520,10 @@ impl FreallySnipperApp {
                     self.delivery.copy(session.flatten());
                 }
             }
+            // OCR text → clipboard (P4.6b), via the same worker.
+            EditorOutcome::CopyText(text) => {
+                self.delivery.copy_text(text);
+            }
             EditorOutcome::Discard => {
                 self.finish(&ctx, None);
                 self.status = Some("Capture discarded.".to_owned());
