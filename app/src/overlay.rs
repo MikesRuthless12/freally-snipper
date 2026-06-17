@@ -319,7 +319,14 @@ impl OverlaySession {
 
                         ui.separator();
 
-                        if ui.button("✕").on_hover_text("Cancel (Esc)").clicked() {
+                        // Trash-can glyph (U+1F5D1) lives in egui's bundled
+                        // emoji-icon-font fallback, so it renders (unlike U+2715
+                        // "✕", which is in none of the default fonts → tofu box).
+                        if ui
+                            .button("🗑")
+                            .on_hover_text("Cancel the capture (Esc)")
+                            .clicked()
+                        {
                             cancel = true;
                         }
                     });

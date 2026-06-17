@@ -6,7 +6,7 @@ ScreenToGif, but **free, local-first, and privacy-respecting** (no accounts, no 
 telemetry).
 
 > **Status:** Phase 3 (Capture overlay action bar) — a top-center action bar on the capture overlay
-> (Camera · Video · Snippet ▾ · Markup · Text Extractor · Color · ✕) that switches the selection
+> (Camera · Video · Snippet ▾ · Markup · Text Extractor · Color · 🗑) that switches the selection
 > shape **live, mid-capture**, sets the markup colour, and — with **Markup** on — hands the snip to
 > an editor preview centered below the selection (Save / Discard); the bar hides while you drag so
 > it's never in the shot. Builds on the Phase 2 home window (Win11-style toolbar, capture timer,
