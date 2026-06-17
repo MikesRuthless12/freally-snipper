@@ -175,10 +175,10 @@ pub struct Settings {
     /// Countdown before a capture starts (Timer ▾).
     pub timer_delay: TimerDelay,
     /// Open the image editor (Toolbar 2) after a capture instead of saving
-    /// directly. The editor arrives in Phase 4; until then captures save as now.
+    /// directly.
     pub show_capture_editor: bool,
     /// Active markup colour (RGBA), set from the toolbar Color picker and reused
-    /// by the editor's tools in later phases.
+    /// by the editor's markup tools.
     pub active_color: [u8; 4],
     /// Selected UI language (BCP-47 code from [`UI_LANGUAGES`]); UI translation
     /// itself arrives in Phase 7.

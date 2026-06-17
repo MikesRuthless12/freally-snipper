@@ -28,7 +28,7 @@ pub fn set_clipboard_image(
 /// Save a capture into `folder` using `format`, returning the written path.
 ///
 /// WebP encoding is not available in `image` 0.25, so a WebP selection is saved
-/// losslessly as PNG for now (full WebP export lands with the editor in Phase 4).
+/// losslessly as PNG for now (until a WebP encoder is wired in).
 pub fn save_capture(
     image: &RgbaImage,
     folder: &Path,

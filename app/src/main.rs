@@ -2,7 +2,8 @@
 //!
 //! Opens the Windows-11-Snipping-Tool-style home window, manages persisted user
 //! settings, and runs the Phase 1 capture flow (hide → snapshot → selection
-//! overlay → save). Editing and video features arrive in later phases.
+//! overlay → save), then the Phase 4 image editor on a marked-up capture. Video
+//! features arrive in later phases.
 #![forbid(unsafe_code)]
 // Release builds are a GUI app: use the Windows subsystem so launching the .exe
 // doesn't open a console window (and closing a console can't kill the app). Debug

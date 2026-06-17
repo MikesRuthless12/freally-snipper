@@ -782,8 +782,8 @@ impl FreallySnipperApp {
     }
 
     /// Horizontal strip of recent-capture thumbnails (P2.2). Clicking a tile
-    /// opens it in the OS default viewer (the in-app editor arrives in Phase 4);
-    /// right-click offers Open / Show in folder / Remove.
+    /// opens it in the OS default viewer; right-click offers Open / Show in
+    /// folder / Remove.
     fn recent_strip(&mut self, ui: &mut egui::Ui) {
         if self.settings.recent_captures.is_empty() {
             ui.label(egui::RichText::new("Your recent captures will appear here.").weak());
@@ -1021,9 +1021,10 @@ impl FreallySnipperApp {
                 if ui
                     .checkbox(&mut show_editor, "Show the capture editor after capturing")
                     .on_hover_text(
-                        "Open the editor below each capture (Save / Discard) instead of saving \
+                        "Open each capture in the image editor (Toolbar 2 — markup, text, shapes, \
+                         emoji, filters, transforms, OCR, and translation) instead of saving \
                          straight away. You can also toggle this per-capture with Markup on the \
-                         capture bar. The full Toolbar 2 markup tools arrive in Phase 4.",
+                         capture bar.",
                     )
                     .changed()
                 {
@@ -1031,8 +1032,8 @@ impl FreallySnipperApp {
                     *dirty = true;
                 }
                 ui.small(
-                    "Markup tools (Toolbar 2) arrive in Phase 4; for now the editor shows a \
-                     Save / Discard preview.",
+                    "The editor opens in its own window — Save writes exactly what you see \
+                     (Save / Copy / Discard, Undo / Redo).",
                 );
 
                 ui.add_space(10.0);
@@ -1276,7 +1277,7 @@ fn draw_thumb(gallery: &mut Gallery, ui: &mut egui::Ui, path: &Path) -> bool {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string());
-    let hover = format!("{name}\n{when}\nOpen (the in-app editor arrives in Phase 4)");
+    let hover = format!("{name}\n{when}\nClick to open in your default viewer");
 
     let mut clicked = false;
     ui.vertical_centered(|ui| {

@@ -279,17 +279,19 @@ impl OverlaySession {
                         if ui
                             .selectable_label(self.markup, "Markup")
                             .on_hover_text(
-                                "Open the editor after capture (Toolbar 2 tools arrive in Phase 4)",
+                                "Open the editor (Toolbar 2) after capture instead of saving",
                             )
                             .clicked()
                         {
                             self.markup = !self.markup;
                         }
 
-                        // Text Extractor — OCR → clipboard (Tesseract) lands in Phase 4.
+                        // Text Extractor — a capture-bar OCR shortcut; for now OCR
+                        // lives in the editor's Extract Text (ocrs), so the bar
+                        // button stays disabled.
                         ui.add_enabled(false, egui::Button::new("Text Extractor"))
                             .on_disabled_hover_text(
-                                "Extract text (OCR → clipboard) arrives in Phase 4",
+                                "Extract text (OCR) — available in the editor (Toolbar 2)",
                             );
 
                         ui.separator();
