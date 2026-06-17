@@ -419,7 +419,7 @@ impl FreallySnipperApp {
             self.finish(ctx, Some(image));
             return;
         }
-        let session = EditorSession::new(ctx, image);
+        let session = EditorSession::new(ctx, image, self.settings.active_color);
         // Reshape the single OS window into a decorated, centered editor window
         // (the immediate path arrives here as the full-desktop overlay; the timed
         // path arrives from a hidden window).
