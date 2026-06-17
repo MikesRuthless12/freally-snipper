@@ -22,6 +22,7 @@
 //! The editor is drawn into the app's single OS window (morphed to a decorated
 //! editor window), matching the one-window model the capture overlay already uses.
 
+mod emoji;
 mod filters;
 mod objects;
 mod ocr;
@@ -259,6 +260,13 @@ pub struct EditorSession {
     ocr_rx: Option<Receiver<Result<String, String>>>,
     /// OCR text waiting to be handed to the app for the clipboard.
     pending_text_copy: Option<String>,
+    /// Emoji picker (P4.7) state: visibility, search text, the (on-demand) Noto
+    /// Color Emoji font bytes, an in-flight download, and any load error.
+    show_emoji_picker: bool,
+    emoji_search: String,
+    emoji_font: Option<Rc<Vec<u8>>>,
+    emoji_font_rx: Option<Receiver<Result<Vec<u8>, String>>>,
+    emoji_font_err: Option<String>,
     /// In-progress stroke points, in image-pixel coordinates (empty = idle).
     stroke: Vec<Pos2>,
     /// Movable overlay objects (P4.3), drawn over the raster, baked on Save.
@@ -321,6 +329,11 @@ impl EditorSession {
             next_image_id: 0,
             ocr_rx: None,
             pending_text_copy: None,
+            show_emoji_picker: false,
+            emoji_search: String::new(),
+            emoji_font: None,
+            emoji_font_rx: None,
+            emoji_font_err: None,
             stroke: Vec::new(),
             objects: Vec::new(),
             selected: None,
@@ -409,6 +422,10 @@ impl EditorSession {
             });
         egui::CentralPanel::default().show_inside(ui, |ui| self.canvas(ui));
 
+        // Emoji picker window (P4.7) — floats over the editor.
+        let ctx = ui.ctx().clone();
+        self.emoji_picker_ui(&ctx);
+
         // Hand any completed OCR text to the app for the clipboard (only when no
         // other action fired this frame).
         if matches!(outcome, EditorOutcome::Active) {
@@ -477,11 +494,13 @@ impl EditorSession {
                 "Watermark",
                 "Add a watermark — low-opacity text (click to place)",
             );
-            disabled_tool(
-                ui,
-                "Emoji",
-                "Emoji picker (colour) — arrives in Phase 4 (P4.7)",
-            );
+            if ui
+                .button("Emoji")
+                .on_hover_text("Insert a colour emoji")
+                .clicked()
+            {
+                self.show_emoji_picker = true;
+            }
             if ui
                 .button("Image")
                 .on_hover_text("Place an image (PNG / JPG / BMP / WebP)")
@@ -1572,7 +1591,12 @@ impl EditorSession {
         if src.width() == 0 || src.height() == 0 {
             return;
         }
-        // Place centred, scaled to fit within half the image (never upscaled).
+        self.place_image_object(src);
+    }
+
+    /// Create a centred, selected Image object from `src`, scaled to fit within
+    /// half the image (never upscaled). Shared by image insert (P4.8) + emoji (P4.7).
+    fn place_image_object(&mut self, src: RgbaImage) {
         let (iw, ih) = (self.image.width() as f32, self.image.height() as f32);
         let (sw, sh) = (src.width() as f32, src.height() as f32);
         let scale = (iw * 0.5 / sw).min(ih * 0.5 / sh).min(1.0);
@@ -1595,6 +1619,115 @@ impl EditorSession {
         self.selected = Some(self.objects.len() - 1);
         self.tool = Tool::Select;
         self.notice = None;
+    }
+
+    /// Start downloading the Noto Color Emoji font if needed (off-thread, P4.7).
+    fn ensure_emoji_font(&mut self, ctx: &egui::Context) {
+        if self.emoji_font.is_some()
+            || self.emoji_font_rx.is_some()
+            || self.emoji_font_err.is_some()
+        {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ctx = ctx.clone();
+        if std::thread::Builder::new()
+            .name("freally-emoji".to_owned())
+            .spawn(move || {
+                let _ = tx.send(emoji::ensure_font());
+                ctx.request_repaint();
+            })
+            .is_ok()
+        {
+            self.emoji_font_rx = Some(rx);
+        }
+    }
+
+    /// Reflect a finished emoji-font download.
+    fn poll_emoji_font(&mut self) {
+        let Some(rx) = &self.emoji_font_rx else {
+            return;
+        };
+        if let Ok(result) = rx.try_recv() {
+            self.emoji_font_rx = None;
+            match result {
+                Ok(bytes) => self.emoji_font = Some(Rc::new(bytes)),
+                Err(err) => self.emoji_font_err = Some(err),
+            }
+        }
+    }
+
+    /// Rasterize the picked `emoji` in colour and drop it as an Image object.
+    fn insert_emoji(&mut self, emoji: &str) {
+        let rendered = {
+            let Some(bytes) = self.emoji_font.as_ref() else {
+                return;
+            };
+            emoji::rasterize(bytes, emoji)
+        };
+        match rendered {
+            Some(img) => {
+                self.place_image_object(img);
+                self.show_emoji_picker = false;
+            }
+            None => self.notice = Some("That emoji isn't in the font.".to_owned()),
+        }
+    }
+
+    /// The searchable emoji picker window (P4.7).
+    fn emoji_picker_ui(&mut self, ctx: &egui::Context) {
+        if !self.show_emoji_picker {
+            return;
+        }
+        self.ensure_emoji_font(ctx);
+        self.poll_emoji_font();
+
+        let mut open = true;
+        let mut pick: Option<String> = None;
+        egui::Window::new("Emoji")
+            .open(&mut open)
+            .default_width(360.0)
+            .show(ctx, |ui| {
+                if self.emoji_font.is_some() {
+                    ui.horizontal(|ui| {
+                        ui.label("Search");
+                        ui.text_edit_singleline(&mut self.emoji_search);
+                    });
+                    ui.separator();
+                    egui::ScrollArea::vertical()
+                        .max_height(280.0)
+                        .show(ui, |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                for (glyph, name) in emoji::search(&self.emoji_search, 240) {
+                                    if ui
+                                        .button(egui::RichText::new(glyph).size(22.0))
+                                        .on_hover_text(name)
+                                        .clicked()
+                                    {
+                                        pick = Some(glyph.to_owned());
+                                    }
+                                }
+                            });
+                        });
+                } else if let Some(err) = &self.emoji_font_err {
+                    ui.colored_label(
+                        Color32::from_rgb(220, 80, 80),
+                        format!("Couldn't load emoji font: {err}"),
+                    );
+                    if ui.button("Retry").clicked() {
+                        self.emoji_font_err = None;
+                    }
+                } else {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label("Downloading Noto Color Emoji (~24 MB)…");
+                    });
+                }
+            });
+        self.show_emoji_picker = open;
+        if let Some(glyph) = pick {
+            self.insert_emoji(&glyph);
+        }
     }
 
     /// Upload source textures for image objects (by id) and drop dead ones.

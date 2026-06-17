@@ -40,3 +40,9 @@ ocrs = "0.12"
 rten = "0.24"
 ureq = "3"
 directories = "6"
+# Emoji objects (P4.7): `swash` (MIT/Apache) rasterizes COLR/CBDT colour glyphs
+# from Noto Color Emoji (OFL, downloaded on demand); `emojis` (MIT) is the
+# searchable emoji database. A picked emoji is rendered to a colour bitmap and
+# dropped as an Image object (reuses P4.8 placement/resize/bake).
+swash = "0.2"
+emojis = "0.8"
