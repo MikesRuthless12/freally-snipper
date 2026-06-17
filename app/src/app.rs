@@ -126,6 +126,7 @@ impl FreallySnipperApp {
         cc: &eframe::CreationContext<'_>,
         mut settings: Settings,
         icon: Option<egui::IconData>,
+        minimized: bool,
     ) -> Self {
         apply_theme(&cc.egui_ctx, settings.theme);
 
@@ -158,9 +159,17 @@ impl FreallySnipperApp {
         // System tray (Windows/macOS) reuses the app icon, but pre-scaled to a
         // small, crisp square — Windows renders the tray slot at ~16–32px, and
         // letting it crush the full-res icon there looks distorted/blurry.
+        // When launched `--minimized` (start-at-login), show the tray so the
+        // hidden window can be reopened, even if minimize-to-tray is off.
         let tray = icon.and_then(|icon| {
             let (rgba, w, h) = tray_icon_rgba(&icon, 64);
-            Tray::new(&cc.egui_ctx, rgba, w, h, settings.minimize_to_tray)
+            Tray::new(
+                &cc.egui_ctx,
+                rgba,
+                w,
+                h,
+                settings.minimize_to_tray || minimized,
+            )
         });
 
         let app = Self {
@@ -176,7 +185,9 @@ impl FreallySnipperApp {
             needs_persist: false,
             tray,
             quitting: false,
-            hidden_to_tray: false,
+            // Launched minimized → the window starts hidden (NativeOptions), so a
+            // hotkey capture returns to the tray instead of popping it open.
+            hidden_to_tray: minimized,
         };
         if pruned {
             app.persist();
@@ -1044,6 +1055,40 @@ impl FreallySnipperApp {
                 if !tray_available {
                     ui.small("System tray runs on Windows and macOS; Linux support arrives in Phase 7.");
                 }
+
+                // Start at login (P4.10) — a reversible per-user autostart entry.
+                ui.add_space(8.0);
+                let mut start_at_login = self.settings.start_at_login;
+                if ui
+                    .checkbox(&mut start_at_login, "Start Freally Snipper when I sign in")
+                    .on_hover_text(
+                        "Launch at sign-in, minimized to the tray, so the hotkey / Print Screen \
+                         work any time without opening the window. Reversible — NOT an OS service.",
+                    )
+                    .changed()
+                {
+                    match crate::autostart::apply(start_at_login) {
+                        Ok(()) => {
+                            self.settings.start_at_login = start_at_login;
+                            *dirty = true;
+                            self.status = Some(
+                                if start_at_login {
+                                    "Freally Snipper will start (minimized) when you sign in."
+                                } else {
+                                    "Removed start-at-login."
+                                }
+                                .to_owned(),
+                            );
+                        }
+                        Err(err) => {
+                            self.status = Some(format!("Couldn't update start-at-login: {err}"));
+                        }
+                    }
+                }
+                ui.small(
+                    "Starts minimized to the tray. On Linux the tray arrives in Phase 7, so it \
+                     starts hidden — reopen with the hotkey.",
+                );
 
                 ui.add_space(12.0);
                 ui.separator();

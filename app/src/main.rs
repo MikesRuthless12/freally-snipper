@@ -10,6 +10,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod autostart;
 mod delivery;
 mod gallery;
 mod hotkey;
@@ -33,12 +34,18 @@ fn main() -> eframe::Result<()> {
     let settings = Settings::load();
     let icon = load_icon();
 
+    // `--minimized` (used by launch-at-login, P4.10): start hidden in the tray.
+    let minimized = std::env::args().skip(1).any(|a| a == "--minimized");
+
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Freally Snipper")
         .with_inner_size([900.0, 600.0])
         .with_min_inner_size([640.0, 420.0]);
     if let Some(icon) = icon.clone() {
         viewport = viewport.with_icon(icon);
+    }
+    if minimized {
+        viewport = viewport.with_visible(false);
     }
 
     let native_options = eframe::NativeOptions {
@@ -50,7 +57,11 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Freally Snipper",
         native_options,
-        Box::new(move |cc| Ok(Box::new(FreallySnipperApp::new(cc, settings, icon)))),
+        Box::new(move |cc| {
+            Ok(Box::new(FreallySnipperApp::new(
+                cc, settings, icon, minimized,
+            )))
+        }),
     )
 }
 
