@@ -58,6 +58,17 @@ pub struct TextData {
     pub family: FontFamily,
     /// Last-rendered stamp size in image pixels, kept so `bounds()` is self-contained.
     pub size: (u32, u32),
+    /// Optional translate-as-you-type target language code (P4.9), e.g. "es".
+    pub target_lang: Option<String>,
+    /// The translated text once MADLAD returns it (rendered instead of `string`).
+    pub translated: Option<String>,
+}
+
+impl TextData {
+    /// The text actually rendered/baked: the translation if present, else the source.
+    pub fn display(&self) -> &str {
+        self.translated.as_deref().unwrap_or(&self.string)
+    }
 }
 
 /// Image object data (P4.8) — a placed image, scaled to the object's bounds.
@@ -243,7 +254,8 @@ impl Object {
         let Some(kind) = self.shape_kind() else {
             match &self.kind {
                 Kind::Text(t) => {
-                    if let Some(stamp) = text::render(&t.string, t.font_px, t.family, self.color) {
+                    if let Some(stamp) = text::render(t.display(), t.font_px, t.family, self.color)
+                    {
                         raster::blit_over(
                             image,
                             &stamp,
@@ -455,6 +467,8 @@ mod tests {
                 font_px: 32.0,
                 family: FontFamily::Sans,
                 size: (40, 40),
+                target_lang: None,
+                translated: None,
             }),
             a: Pos2::ZERO,
             b: Pos2::new(40.0, 40.0),
@@ -524,6 +538,8 @@ mod tests {
                 font_px: 48.0,
                 family: FontFamily::Sans,
                 size: (0, 0),
+                target_lang: None,
+                translated: None,
             }),
             a: Pos2::new(10.0, 10.0),
             b: Pos2::new(10.0, 10.0),
