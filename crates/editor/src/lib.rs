@@ -24,12 +24,16 @@
 
 mod objects;
 mod raster;
+mod text;
+
+use std::collections::HashMap;
 
 use egui::{Color32, PointerButton, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
 use freally_capture::image::RgbaImage;
 
-use objects::{Object, ShapeKind};
+use objects::{Kind, Object, ShapeKind, TextData};
 use raster::Paint;
+use text::FontFamily;
 
 /// Crate identifier, surfaced in version banners and logs.
 pub const CRATE_NAME: &str = "freally-editor";
@@ -82,6 +86,10 @@ enum Tool {
     Eraser,
     /// Draw a new overlay shape of this kind (P4.3).
     Shape(ShapeKind),
+    /// Place a text object (P4.4).
+    Text,
+    /// Place a watermark (low-opacity text) object (P4.4).
+    Watermark,
 }
 
 impl Tool {
@@ -113,6 +121,14 @@ enum ObjDrag {
     Handle(usize),
     /// Drawing a new shape (the new object is selected).
     Create,
+}
+
+/// A rendered text stamp + its GPU texture, cached by content (P4.4).
+struct CachedText {
+    /// Stamp size in image pixels (so the object's bounds stay correct).
+    size: (u32, u32),
+    /// `None` for empty text (nothing to draw).
+    texture: Option<egui::TextureHandle>,
 }
 
 /// Highlighter behaviour.
@@ -157,6 +173,11 @@ pub struct EditorSession {
     /// Default width + fill for new shape objects.
     shape_width: f32,
     shape_fill: bool,
+    /// Defaults for new text objects (P4.4).
+    text_px: f32,
+    text_family: FontFamily,
+    /// Rendered text stamps + textures, keyed by content (string/size/family/colour).
+    text_cache: HashMap<String, CachedText>,
     /// In-progress stroke points, in image-pixel coordinates (empty = idle).
     stroke: Vec<Pos2>,
     /// Movable overlay objects (P4.3), drawn over the raster, baked on Save.
@@ -210,6 +231,9 @@ impl EditorSession {
             erase_mode: EraseMode::White,
             shape_width: DEFAULT_SHAPE_WIDTH,
             shape_fill: false,
+            text_px: 48.0,
+            text_family: FontFamily::Sans,
+            text_cache: HashMap::new(),
             stroke: Vec::new(),
             objects: Vec::new(),
             selected: None,
@@ -342,11 +366,12 @@ impl EditorSession {
             })
             .response
             .on_hover_text("Draw a rectangle, oval, line or arrow (drag on the image)");
-            disabled_tool(ui, "Text", "Text object — arrives in Phase 4 (P4.4)");
-            disabled_tool(
+            self.tool_button(ui, Tool::Text, "Text", "Add a text object (click to place)");
+            self.tool_button(
                 ui,
+                Tool::Watermark,
                 "Watermark",
-                "Watermark object — arrives in Phase 4 (P4.4)",
+                "Add a watermark — low-opacity text (click to place)",
             );
             disabled_tool(
                 ui,
@@ -399,13 +424,17 @@ impl EditorSession {
         ui.add_space(2.0);
         match self.tool {
             Tool::Select => {
-                ui.label(
-                    egui::RichText::new(
-                        "Click an object to select · drag to move · drag a handle to resize · \
-                         Delete to remove · drag empty space to pan",
-                    )
-                    .weak(),
-                );
+                if self.selected_is_text() {
+                    self.text_props_ui(ui);
+                } else {
+                    ui.label(
+                        egui::RichText::new(
+                            "Click an object to select · drag to move · drag a handle to resize · \
+                             Delete to remove · drag empty space to pan",
+                        )
+                        .weak(),
+                    );
+                }
             }
             Tool::Shape(kind) => {
                 ui.horizontal_wrapped(|ui| {
@@ -426,8 +455,86 @@ impl EditorSession {
                     }
                 });
             }
+            Tool::Text | Tool::Watermark => self.text_defaults_ui(ui),
             _ => self.raster_options(ui),
         }
+    }
+
+    /// Whether the selected object is a text object.
+    fn selected_is_text(&self) -> bool {
+        self.selected
+            .and_then(|i| self.objects.get(i))
+            .is_some_and(|o| o.text().is_some())
+    }
+
+    /// Defaults shown while a text/watermark tool is armed (applied to new text).
+    fn text_defaults_ui(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Size");
+            ui.add(egui::Slider::new(&mut self.text_px, 8.0..=240.0).suffix(" px"));
+            ui.separator();
+            ui.label("Font");
+            family_combo(ui, "text_default_family", &mut self.text_family);
+            ui.separator();
+            ui.label("Color");
+            ui.color_edit_button_srgba_unmultiplied(&mut self.color);
+            ui.separator();
+            ui.label(egui::RichText::new("Click on the image to place text").weak());
+        });
+    }
+
+    /// Live editor for the selected text object's string / size / font / opacity.
+    fn text_props_ui(&mut self, ui: &mut egui::Ui) {
+        let Some(i) = self.selected else { return };
+        if self.objects.get(i).and_then(|o| o.text()).is_none() {
+            return;
+        }
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Text");
+            let mut string = self.objects[i]
+                .text()
+                .map(|t| t.string.clone())
+                .unwrap_or_default();
+            if ui
+                .add(egui::TextEdit::singleline(&mut string).desired_width(180.0))
+                .changed()
+            {
+                if let Some(t) = self.objects[i].text_mut() {
+                    t.string = string;
+                }
+            }
+            ui.separator();
+            ui.label("Size");
+            let mut px = self.objects[i].text().map(|t| t.font_px).unwrap_or(48.0);
+            if ui
+                .add(egui::Slider::new(&mut px, 8.0..=240.0).suffix(" px"))
+                .changed()
+            {
+                if let Some(t) = self.objects[i].text_mut() {
+                    t.font_px = px;
+                }
+            }
+            ui.separator();
+            ui.label("Font");
+            let mut family = self.objects[i]
+                .text()
+                .map(|t| t.family)
+                .unwrap_or(FontFamily::Sans);
+            if family_combo(ui, "text_sel_family", &mut family) {
+                if let Some(t) = self.objects[i].text_mut() {
+                    t.family = family;
+                }
+            }
+            ui.separator();
+            ui.label("Opacity");
+            let mut alpha = self.objects[i].color[3];
+            if ui.add(egui::Slider::new(&mut alpha, 0..=255)).changed() {
+                self.objects[i].color[3] = alpha;
+            }
+            ui.separator();
+            ui.label("Color");
+            ui.color_edit_button_srgba_unmultiplied(&mut self.objects[i].color);
+        });
     }
 
     /// Size + colour + mode toggles for the active raster tool (P4.2).
@@ -614,6 +721,10 @@ impl EditorSession {
             PAN_KEEP,
         );
 
+        // Render/cache text stamps and keep their bounds in sync before drawing.
+        let ctx = ui.ctx().clone();
+        self.sync_text(&ctx);
+
         // Paint, clipped to the canvas.
         let painter = ui.painter_at(canvas);
         let image_rect = Rect::from_min_size(
@@ -641,6 +752,19 @@ impl EditorSession {
         let to_screen = |p: Pos2| self.image_to_screen(canvas, p);
         for obj in &self.objects {
             obj.draw(&painter, &to_screen, self.view.zoom);
+            // Text objects draw from their cached texture (the editor owns the ctx).
+            if let Some(t) = obj.text() {
+                let key = text_key(&t.string, t.font_px, t.family, obj.color);
+                if let Some(tex) = self.text_cache.get(&key).and_then(|c| c.texture.as_ref()) {
+                    let rect = Rect::from_two_pos(to_screen(obj.a), to_screen(obj.b));
+                    painter.image(
+                        tex.id(),
+                        rect,
+                        Rect::from_min_max(Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
+                }
+            }
         }
         if let Some(obj) = self.selected.and_then(|i| self.objects.get(i)) {
             objects::draw_selection(&painter, obj, &to_screen, HANDLE_PX);
@@ -662,8 +786,40 @@ impl EditorSession {
         match self.tool {
             Tool::Select => self.handle_select(response, pointer),
             Tool::Shape(kind) => self.handle_shape(response, kind, pointer),
+            Tool::Text | Tool::Watermark => self.handle_text_tool(response, pointer),
             _ => self.handle_raster(response, pointer),
         }
+    }
+
+    /// Text / Watermark tool: a click places a new text object, then switches to
+    /// the Select tool so it can be edited and moved.
+    fn handle_text_tool(&mut self, response: &egui::Response, pointer: Option<Pos2>) {
+        if !response.clicked_by(PointerButton::Primary) {
+            return;
+        }
+        let Some(p) = pointer else { return };
+        self.push_objects_undo();
+        let watermark = self.tool == Tool::Watermark;
+        let string = if watermark { "WATERMARK" } else { "Text" }.to_owned();
+        let mut color = self.color;
+        if watermark {
+            color[3] = color[3].min(110); // watermarks are translucent by default
+        }
+        self.objects.push(Object {
+            kind: Kind::Text(TextData {
+                string,
+                font_px: self.text_px,
+                family: self.text_family,
+                size: (0, 0),
+            }),
+            a: p,
+            b: p,
+            color,
+            width: 0.0,
+            fill: false,
+        });
+        self.selected = Some(self.objects.len() - 1);
+        self.tool = Tool::Select;
     }
 
     /// Raster freehand drawing (P4.2): a primary drag paints a stroke; a click
@@ -748,7 +904,7 @@ impl EditorSession {
             if let Some(p) = pointer {
                 self.push_objects_undo();
                 self.objects.push(Object {
-                    kind,
+                    kind: Kind::Shape(kind),
                     a: p,
                     b: p,
                     color: self.color,
@@ -846,7 +1002,7 @@ impl EditorSession {
                 EraseMode::White => Paint::White,
                 EraseMode::MarkupOnly => Paint::Restore,
             },
-            Tool::Select | Tool::Shape(_) => return None,
+            Tool::Select | Tool::Shape(_) | Tool::Text | Tool::Watermark => return None,
         })
     }
 
@@ -857,7 +1013,7 @@ impl EditorSession {
             Tool::Brush => self.brush_width,
             Tool::Highlighter => self.hl_width,
             Tool::Eraser => self.eraser_width,
-            Tool::Select | Tool::Shape(_) => 0.0,
+            Tool::Select | Tool::Shape(_) | Tool::Text | Tool::Watermark => 0.0,
         }
     }
 
@@ -869,7 +1025,7 @@ impl EditorSession {
             Tool::Brush => self.brush_width = width,
             Tool::Highlighter => self.hl_width = width,
             Tool::Eraser => self.eraser_width = width,
-            Tool::Select | Tool::Shape(_) => {}
+            Tool::Select | Tool::Shape(_) | Tool::Text | Tool::Watermark => {}
         }
     }
 
@@ -977,6 +1133,62 @@ impl EditorSession {
         }
     }
 
+    /// Render/cache each text object's stamp (by content) and keep its bounds in
+    /// sync (`b = a + stamp size`). Called once per frame before drawing.
+    fn sync_text(&mut self, ctx: &egui::Context) {
+        let reqs: Vec<(usize, String)> = self
+            .objects
+            .iter()
+            .enumerate()
+            .filter_map(|(i, o)| {
+                o.text()
+                    .map(|t| (i, text_key(&t.string, t.font_px, t.family, o.color)))
+            })
+            .collect();
+
+        for (i, key) in &reqs {
+            if !self.text_cache.contains_key(key) {
+                let o = &self.objects[*i];
+                let t = o.text().expect("filtered to text objects");
+                let entry = match text::render(&t.string, t.font_px, t.family, o.color) {
+                    Some(stamp) => {
+                        let size = (stamp.width(), stamp.height());
+                        let img = egui::ColorImage::from_rgba_unmultiplied(
+                            [size.0 as usize, size.1 as usize],
+                            stamp.as_raw(),
+                        );
+                        let texture =
+                            ctx.load_texture("freally_text", img, egui::TextureOptions::LINEAR);
+                        CachedText {
+                            size,
+                            texture: Some(texture),
+                        }
+                    }
+                    None => CachedText {
+                        size: (0, 0),
+                        texture: None,
+                    },
+                };
+                self.text_cache.insert(key.clone(), entry);
+            }
+        }
+
+        for (i, key) in &reqs {
+            if let Some(size) = self.text_cache.get(key).map(|c| c.size) {
+                let a = self.objects[*i].a;
+                if let Some(t) = self.objects[*i].text_mut() {
+                    t.size = size;
+                }
+                self.objects[*i].b = a + egui::vec2(size.0 as f32, size.1 as f32);
+            }
+        }
+
+        // Bound memory: drop the whole cache if it grows large (re-rendered lazily).
+        if self.text_cache.len() > 64 {
+            self.text_cache.clear();
+        }
+    }
+
     /// Re-upload the working raster to the GPU texture after it changes.
     fn reupload(&mut self) {
         let size = [self.image.width() as usize, self.image.height() as usize];
@@ -1017,6 +1229,31 @@ fn upload(ctx: &egui::Context, image: &RgbaImage) -> egui::TextureHandle {
 fn disabled_tool(ui: &mut egui::Ui, label: &str, arrives: &str) {
     ui.add_enabled(false, egui::Button::new(label))
         .on_disabled_hover_text(arrives);
+}
+
+/// A font-family combo box; returns `true` if the selection changed.
+fn family_combo(ui: &mut egui::Ui, id: &str, family: &mut FontFamily) -> bool {
+    let mut changed = false;
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(family.label())
+        .show_ui(ui, |ui| {
+            for f in FontFamily::ALL {
+                changed |= ui.selectable_value(family, f, f.label()).changed();
+            }
+        });
+    changed
+}
+
+/// Content key for the text-stamp cache (string + size + family + colour), so the
+/// stamp/texture are recomputed only when one of those changes.
+fn text_key(string: &str, font_px: f32, family: FontFamily, color: [u8; 4]) -> String {
+    format!(
+        "{}\u{1}{}\u{1}{:?}\u{1}{:?}",
+        string,
+        font_px.to_bits(),
+        family,
+        color
+    )
 }
 
 /// Screen colour for the live stroke preview of a given paint mode.

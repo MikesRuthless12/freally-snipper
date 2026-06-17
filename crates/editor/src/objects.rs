@@ -1,17 +1,19 @@
-//! Movable overlay objects (P4.3) — shapes that float above the raster, are
-//! selected/moved/resized as objects, and are **flattened into the bitmap only on
-//! Save**. P4.3 ships the four shapes (rectangle / oval / line / arrow); the same
-//! object model carries Text / Watermark (P4.4), Emoji (P4.7) and Image (P4.8).
+//! Movable overlay objects (P4.3 + P4.4) — shapes and text that float above the
+//! raster, are selected/moved/resized as objects, and are **flattened into the
+//! bitmap only on Save**. P4.3 shipped the four shapes (rectangle / oval / line /
+//! arrow); P4.4 adds **Text** and **Watermark** (rendered via [`crate::text`]).
+//! The same model later carries Emoji (P4.7) and Image (P4.8).
 //!
 //! Geometry is in **image-pixel** space, so it is resolution-independent and the
-//! on-screen preview ([`Object::draw`]) matches the Save-time bake
-//! ([`Object::bake_into`]). For Rect/Oval, `a`/`b` are opposite corners; for
-//! Line/Arrow they are the two endpoints.
+//! on-screen preview matches the Save-time bake. For Rect/Oval, `a`/`b` are
+//! opposite corners; for Line/Arrow they are the two endpoints; for Text, `a` is
+//! the top-left and `b = a + rendered size`.
 
 use egui::{Color32, Pos2, Rect, Stroke, StrokeKind, Vec2};
 use freally_capture::image::RgbaImage;
 
 use crate::raster;
+use crate::text::{self, FontFamily};
 
 /// The shape an [`Object`] draws.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -45,21 +47,63 @@ impl ShapeKind {
     }
 }
 
+/// Text object data (P4.4) — for both plain Text and Watermark.
+#[derive(Clone)]
+pub struct TextData {
+    pub string: String,
+    /// Font size in image pixels.
+    pub font_px: f32,
+    pub family: FontFamily,
+    /// Last-rendered stamp size in image pixels, kept so `bounds()` is self-contained.
+    pub size: (u32, u32),
+}
+
+/// What an [`Object`] is.
+#[derive(Clone)]
+pub enum Kind {
+    Shape(ShapeKind),
+    Text(TextData),
+}
+
 /// A movable, selectable, resizable overlay object.
 #[derive(Clone)]
 pub struct Object {
-    pub kind: ShapeKind,
-    /// Opposite corners (Rect/Oval) or endpoints (Line/Arrow), image space.
+    pub kind: Kind,
+    /// Opposite corners (Rect/Oval), endpoints (Line/Arrow), or top-left + size (Text).
     pub a: Pos2,
     pub b: Pos2,
     pub color: [u8; 4],
-    /// Stroke width in image pixels.
+    /// Stroke width in image pixels (shapes only).
     pub width: f32,
     /// Fill the interior (Rect/Oval only).
     pub fill: bool,
 }
 
 impl Object {
+    /// The shape kind, or `None` for a text object.
+    fn shape_kind(&self) -> Option<ShapeKind> {
+        match self.kind {
+            Kind::Shape(s) => Some(s),
+            Kind::Text(_) => None,
+        }
+    }
+
+    /// The text data, if this is a text object.
+    pub fn text(&self) -> Option<&TextData> {
+        match &self.kind {
+            Kind::Text(t) => Some(t),
+            Kind::Shape(_) => None,
+        }
+    }
+
+    /// Mutable text data, if this is a text object.
+    pub fn text_mut(&mut self) -> Option<&mut TextData> {
+        match &mut self.kind {
+            Kind::Text(t) => Some(t),
+            Kind::Shape(_) => None,
+        }
+    }
+
     /// Axis-aligned bounding rectangle (image space).
     pub fn bounds(&self) -> Rect {
         Rect::from_two_pos(self.a, self.b)
@@ -71,10 +115,13 @@ impl Object {
         self.b += delta;
     }
 
-    /// Selection-handle positions (image space): the 4 bounding-box corners for
-    /// box shapes, the 2 endpoints for line/arrow.
+    /// Selection-handle positions (image space): box corners for Rect/Oval, the two
+    /// endpoints for Line/Arrow, none for Text (resize via the size property).
     pub fn handles(&self) -> Vec<Pos2> {
-        if self.kind.is_box() {
+        let Some(kind) = self.shape_kind() else {
+            return Vec::new();
+        };
+        if kind.is_box() {
             let r = self.bounds();
             vec![
                 r.left_top(),
@@ -87,10 +134,12 @@ impl Object {
         }
     }
 
-    /// Drag handle `i` (from [`Object::handles`]) to `to`, resizing or moving the
-    /// endpoint. The diagonally opposite corner stays fixed for box shapes.
+    /// Drag handle `i` to `to`, resizing or moving the endpoint (shapes only).
     pub fn drag_handle(&mut self, i: usize, to: Pos2) {
-        if self.kind.is_box() {
+        let Some(kind) = self.shape_kind() else {
+            return;
+        };
+        if kind.is_box() {
             let r = self.bounds();
             let (mut left, mut top, mut right, mut bottom) =
                 (r.left(), r.top(), r.right(), r.bottom());
@@ -126,14 +175,17 @@ impl Object {
 
     /// Whether `p` (image space) hits the object, within `tol` image pixels.
     pub fn hit(&self, p: Pos2, tol: f32) -> bool {
+        let Some(kind) = self.shape_kind() else {
+            // Text: the whole rendered box is the hit area.
+            return self.bounds().expand(tol).contains(p);
+        };
         let half = self.width * 0.5;
-        match self.kind {
+        match kind {
             ShapeKind::Rect | ShapeKind::Oval => {
                 let r = self.bounds();
                 if self.fill {
                     return r.expand(tol).contains(p);
                 }
-                // Hollow shape: near the outline band, not deep in the interior.
                 let inner = r.expand(-(half + tol));
                 r.expand(half + tol).contains(p) && !(inner.is_positive() && inner.contains(p))
             }
@@ -143,11 +195,25 @@ impl Object {
         }
     }
 
-    /// Bake the object into `image` (Save flattening). Mirrors [`Object::draw`].
+    /// Bake the object into `image` (Save flattening). Text is re-rendered and
+    /// composited; shapes are rasterized.
     pub fn bake_into(&self, image: &mut RgbaImage) {
+        let Some(kind) = self.shape_kind() else {
+            if let Kind::Text(t) = &self.kind {
+                if let Some(stamp) = text::render(&t.string, t.font_px, t.family, self.color) {
+                    raster::blit_over(
+                        image,
+                        &stamp,
+                        self.a.x.round() as i32,
+                        self.a.y.round() as i32,
+                    );
+                }
+            }
+            return;
+        };
         let rgb = [self.color[0], self.color[1], self.color[2]];
         let radius = (self.width * 0.5).max(0.5);
-        match self.kind {
+        match kind {
             ShapeKind::Rect => {
                 let b = self.bounds();
                 if self.fill {
@@ -181,12 +247,15 @@ impl Object {
         }
     }
 
-    /// Draw the object on-screen (live preview). `to_screen` maps image → screen
-    /// points; `scale` is points per image pixel.
+    /// Draw the *shape* on-screen (live preview). Text objects draw nothing here —
+    /// they are drawn by the editor from a cached texture (it owns the egui context).
     pub fn draw(&self, painter: &egui::Painter, to_screen: &impl Fn(Pos2) -> Pos2, scale: f32) {
+        let Some(kind) = self.shape_kind() else {
+            return;
+        };
         let color = self.color32();
         let stroke = Stroke::new((self.width * scale).max(1.0), color);
-        match self.kind {
+        match kind {
             ShapeKind::Rect => {
                 let r = Rect::from_two_pos(to_screen(self.a), to_screen(self.b));
                 if self.fill {
@@ -278,7 +347,6 @@ fn arrow_head(a: Pos2, b: Pos2, width: f32) -> [Pos2; 2] {
     let head = (len * 0.3).clamp(width * 2.0, cap).min(len);
     let angle = 0.5_f32; // ~28° barbs
     let (sin, cos) = angle.sin_cos();
-    // Rotate the reversed unit vector by ±angle.
     let back = -unit;
     let rot = |v: Vec2, s: f32| Vec2::new(v.x * cos - v.y * s, v.x * s + v.y * cos);
     [b + rot(back, sin) * head, b + rot(back, -sin) * head]
@@ -300,9 +368,9 @@ mod tests {
     use super::*;
     use freally_capture::image::{Rgba, RgbaImage};
 
-    fn obj(kind: ShapeKind, a: (f32, f32), b: (f32, f32), fill: bool) -> Object {
+    fn shape(kind: ShapeKind, a: (f32, f32), b: (f32, f32), fill: bool) -> Object {
         Object {
-            kind,
+            kind: Kind::Shape(kind),
             a: Pos2::new(a.0, a.1),
             b: Pos2::new(b.0, b.1),
             color: [255, 0, 0, 255],
@@ -312,41 +380,57 @@ mod tests {
     }
 
     #[test]
-    fn handle_counts_match_shape() {
+    fn handle_counts_match_shape_and_text() {
         assert_eq!(
-            obj(ShapeKind::Rect, (0.0, 0.0), (10.0, 10.0), false)
+            shape(ShapeKind::Rect, (0.0, 0.0), (10.0, 10.0), false)
                 .handles()
                 .len(),
             4
         );
         assert_eq!(
-            obj(ShapeKind::Line, (0.0, 0.0), (10.0, 10.0), false)
+            shape(ShapeKind::Line, (0.0, 0.0), (10.0, 10.0), false)
                 .handles()
                 .len(),
             2
         );
+        // Text has no resize handles (size via the property).
+        let txt = Object {
+            kind: Kind::Text(TextData {
+                string: "Hi".into(),
+                font_px: 32.0,
+                family: FontFamily::Sans,
+                size: (40, 40),
+            }),
+            a: Pos2::ZERO,
+            b: Pos2::new(40.0, 40.0),
+            color: [0, 0, 0, 255],
+            width: 0.0,
+            fill: false,
+        };
+        assert!(txt.handles().is_empty());
+        assert!(txt.hit(Pos2::new(20.0, 20.0), 2.0)); // inside its box
     }
 
     #[test]
     fn filled_rect_hits_interior_hollow_hits_only_border() {
-        let filled = obj(ShapeKind::Rect, (0.0, 0.0), (20.0, 20.0), true);
-        assert!(filled.hit(Pos2::new(10.0, 10.0), 2.0)); // centre hits when filled
-        let hollow = obj(ShapeKind::Rect, (0.0, 0.0), (20.0, 20.0), false);
-        assert!(!hollow.hit(Pos2::new(10.0, 10.0), 2.0)); // centre misses when hollow
-        assert!(hollow.hit(Pos2::new(0.0, 10.0), 2.0)); // on the left edge hits
+        let filled = shape(ShapeKind::Rect, (0.0, 0.0), (20.0, 20.0), true);
+        assert!(filled.hit(Pos2::new(10.0, 10.0), 2.0));
+        let hollow = shape(ShapeKind::Rect, (0.0, 0.0), (20.0, 20.0), false);
+        assert!(!hollow.hit(Pos2::new(10.0, 10.0), 2.0));
+        assert!(hollow.hit(Pos2::new(0.0, 10.0), 2.0));
     }
 
     #[test]
     fn line_hit_tests_distance_to_segment() {
-        let line = obj(ShapeKind::Line, (0.0, 0.0), (10.0, 0.0), false);
-        assert!(line.hit(Pos2::new(5.0, 1.0), 2.0)); // close to the segment
-        assert!(!line.hit(Pos2::new(5.0, 8.0), 2.0)); // far from it
+        let line = shape(ShapeKind::Line, (0.0, 0.0), (10.0, 0.0), false);
+        assert!(line.hit(Pos2::new(5.0, 1.0), 2.0));
+        assert!(!line.hit(Pos2::new(5.0, 8.0), 2.0));
     }
 
     #[test]
     fn drag_corner_moves_only_that_corner() {
-        let mut o = obj(ShapeKind::Rect, (0.0, 0.0), (10.0, 10.0), false);
-        o.drag_handle(0, Pos2::new(-5.0, -5.0)); // left-top corner
+        let mut o = shape(ShapeKind::Rect, (0.0, 0.0), (10.0, 10.0), false);
+        o.drag_handle(0, Pos2::new(-5.0, -5.0));
         assert_eq!(
             o.bounds(),
             Rect::from_min_max(Pos2::new(-5.0, -5.0), Pos2::new(10.0, 10.0))
@@ -355,7 +439,7 @@ mod tests {
 
     #[test]
     fn translate_moves_both_points() {
-        let mut o = obj(ShapeKind::Line, (1.0, 2.0), (3.0, 4.0), false);
+        let mut o = shape(ShapeKind::Line, (1.0, 2.0), (3.0, 4.0), false);
         o.translate(Vec2::new(10.0, 20.0));
         assert_eq!(o.a, Pos2::new(11.0, 22.0));
         assert_eq!(o.b, Pos2::new(13.0, 24.0));
@@ -364,15 +448,36 @@ mod tests {
     #[test]
     fn filled_rect_bakes_its_interior() {
         let mut img = RgbaImage::from_pixel(20, 20, Rgba([255, 255, 255, 255]));
-        obj(ShapeKind::Rect, (4.0, 4.0), (16.0, 16.0), true).bake_into(&mut img);
-        assert_eq!(img.get_pixel(10, 10).0, [255, 0, 0, 255]); // interior is red
-        assert_eq!(img.get_pixel(0, 0).0, [255, 255, 255, 255]); // outside untouched
+        shape(ShapeKind::Rect, (4.0, 4.0), (16.0, 16.0), true).bake_into(&mut img);
+        assert_eq!(img.get_pixel(10, 10).0, [255, 0, 0, 255]);
+        assert_eq!(img.get_pixel(0, 0).0, [255, 255, 255, 255]);
     }
 
     #[test]
     fn line_bakes_along_its_path() {
         let mut img = RgbaImage::from_pixel(20, 6, Rgba([255, 255, 255, 255]));
-        obj(ShapeKind::Line, (2.0, 3.0), (18.0, 3.0), false).bake_into(&mut img);
-        assert_eq!(img.get_pixel(10, 3).0, [255, 0, 0, 255]); // on the line
+        shape(ShapeKind::Line, (2.0, 3.0), (18.0, 3.0), false).bake_into(&mut img);
+        assert_eq!(img.get_pixel(10, 3).0, [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn text_bakes_ink_into_the_image() {
+        let mut img = RgbaImage::from_pixel(200, 80, Rgba([255, 255, 255, 255]));
+        let txt = Object {
+            kind: Kind::Text(TextData {
+                string: "Hi".into(),
+                font_px: 48.0,
+                family: FontFamily::Sans,
+                size: (0, 0),
+            }),
+            a: Pos2::new(10.0, 10.0),
+            b: Pos2::new(10.0, 10.0),
+            color: [255, 0, 0, 255],
+            width: 0.0,
+            fill: false,
+        };
+        txt.bake_into(&mut img);
+        // Some pixel changed from white (text ink landed).
+        assert!(img.pixels().any(|p| p.0 != [255, 255, 255, 255]));
     }
 }

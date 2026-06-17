@@ -118,6 +118,29 @@ pub fn fill_ellipse(image: &mut RgbaImage, center: (f32, f32), radius: (f32, f32
     }
 }
 
+/// Alpha-composite the RGBA `stamp` onto `image` with its top-left at image pixel
+/// `(x, y)` — used to bake a rendered text stamp (P4.4) into the raster.
+pub fn blit_over(image: &mut RgbaImage, stamp: &RgbaImage, x: i32, y: i32) {
+    for sy in 0..stamp.height() {
+        let py = y + sy as i32;
+        if py < 0 || py >= image.height() as i32 {
+            continue;
+        }
+        for sx in 0..stamp.width() {
+            let px = x + sx as i32;
+            if px < 0 || px >= image.width() as i32 {
+                continue;
+            }
+            let s = stamp.get_pixel(sx, sy).0;
+            if s[3] == 0 {
+                continue;
+            }
+            let out = blend_over(image.get_pixel(px as u32, py as u32).0, s);
+            image.put_pixel(px as u32, py as u32, Rgba(out));
+        }
+    }
+}
+
 /// Straight alpha `src`-over composite of `color` onto `dst` (both RGBA bytes).
 fn blend_over(dst: [u8; 4], color: [u8; 4]) -> [u8; 4] {
     let a = color[3] as f32 / 255.0;
