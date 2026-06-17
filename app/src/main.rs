@@ -7,9 +7,11 @@
 
 mod app;
 mod delivery;
+mod gallery;
 mod hotkey;
 mod output;
 mod overlay;
+mod print_screen;
 mod settings;
 
 use eframe::egui;
@@ -17,8 +19,8 @@ use eframe::egui;
 use app::FreallySnipperApp;
 use settings::Settings;
 
-/// 256×256 brand icon, embedded so the window icon needs no runtime file lookup.
-const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
+/// Brand icon, embedded so the window icon needs no runtime file lookup.
+const ICON_PNG: &[u8] = include_bytes!("../assets/Freally_Snipper_Icon_Dark.png");
 
 fn main() -> eframe::Result<()> {
     print_banner();

@@ -21,6 +21,9 @@ use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 pub struct Hotkeys {
     manager: GlobalHotKeyManager,
     current: Option<HotKey>,
+    /// Optional secondary binding for the Print Screen key (P1.5), registered
+    /// alongside `current` so either shortcut opens a capture.
+    print_screen: Option<HotKey>,
     fired: Arc<AtomicBool>,
 }
 
@@ -41,6 +44,7 @@ impl Hotkeys {
         Some(Self {
             manager,
             current: None,
+            print_screen: None,
             fired,
         })
     }
@@ -68,6 +72,38 @@ impl Hotkeys {
             let _ = self.manager.unregister(old);
         }
         true
+    }
+
+    /// Register (or unregister) **Print Screen** as an additional capture
+    /// shortcut for the P1.5 "Open Freally Snipper with Print Screen" option.
+    /// This is independent of the primary [`set_hotkey`](Self::set_hotkey)
+    /// binding — both fire the same capture. Returns `true` on success; a
+    /// failure (e.g. the OS has no Print Screen key, or it is already taken)
+    /// leaves the primary hotkey untouched.
+    pub fn set_print_screen(&mut self, enabled: bool) -> bool {
+        if enabled {
+            if self.print_screen.is_some() {
+                return true; // already registered
+            }
+            let hotkey: HotKey = match "PrintScreen".parse() {
+                Ok(hotkey) => hotkey,
+                Err(err) => {
+                    eprintln!("Freally Snipper: cannot parse Print Screen hotkey: {err}");
+                    return false;
+                }
+            };
+            if let Err(err) = self.manager.register(hotkey) {
+                eprintln!("Freally Snipper: cannot register Print Screen: {err}");
+                return false;
+            }
+            self.print_screen = Some(hotkey);
+            true
+        } else {
+            if let Some(hotkey) = self.print_screen.take() {
+                let _ = self.manager.unregister(hotkey);
+            }
+            true
+        }
     }
 
     /// Returns `true` once per press (clears the flag).

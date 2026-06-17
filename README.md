@@ -5,9 +5,10 @@ for **Windows, macOS, and Linux** — in the spirit of the Windows 11 Snipping T
 ScreenToGif, but **free, local-first, and privacy-respecting** (no accounts, no cloud, no
 telemetry).
 
-> **Status:** Phase 1 (Capture core) — multi-monitor screenshots, the selection overlay
-> (Rectangle / Window / Freeform / Full screen), a global hotkey, and copy-to-clipboard +
-> save-to-file. (Phase 0 delivered the workspace, app shell, settings, CI, and packaging.)
+> **Status:** Phase 2 (Home window) — a Win11-style capture toolbar (New · Camera · Video ·
+> Snippet ▾ · Timer ▾ · Color), a recent-captures gallery, full settings (hotkey, save folder,
+> format, theme, 18-language picker), an About panel, and an opt-in Print Screen takeover. Builds
+> on the Phase 1 capture core and Phase 0 foundation.
 
 > **🔒 No bundled AI models — full transparency.** Capture and image/video editing work **100%
 > offline**. The **optional** speech-to-text, translation, and dubbing features use third-party AI
@@ -62,9 +63,10 @@ on the home window. The window hides and the screen freezes under a dimmed selec
 - **Full screen** — captures every monitor at once.
 - **Esc** cancels.
 
+Pick the mode from **Snippet ▾** and an optional countdown from **Timer ▾** (3 / 5 / 10 s).
 Each capture is **copied to the clipboard** and **saved** to your save folder (default
-`Pictures/Freally Snipper`; change it with **Settings → Save folder → Change…**). The capture
-hotkey and default snippet mode are also configurable in Settings.
+`Pictures/Freally Snipper`), and appears as a **thumbnail** on the home window — click it to
+open in your OS viewer (the in-app editor arrives in Phase 4).
 
 ## Develop
 
@@ -100,11 +102,15 @@ which builds the app on all three OSes, **zips each**, and opens a **draft GitHu
 downloadable zips (you review, then publish):
 
 ```sh
-git tag v0.1.0 && git push origin v0.1.0
+git tag v0.19.84 && git push origin v0.19.84
 ```
 
 Signed/notarized installers (MSI / .dmg / AppImage) and auto-update arrive in
 **Phase 7 — Distribution & polish**.
+
+A **Releases &amp; Updates** web page lives in [`docs/`](docs/) (a static site, not yet deployed).
+Publish it via **Settings → Pages → Deploy from a branch → `main` / `docs`** to serve it at
+`https://mikesruthless12.github.io/freally-snipper/`.
 
 ## Workspace layout
 
@@ -122,6 +128,7 @@ Signed/notarized installers (MSI / .dmg / AppImage) and auto-update arrive in
 ## Settings
 
 On first run, settings are written as JSON to your OS configuration directory (resolved via the
-[`directories`](https://crates.io/crates/directories) crate). They hold the capture hotkey, save
-folder, default image format, theme, and default snippet mode, and persist across runs. The exact
-path is shown at the bottom of the in-app **Settings** section.
+[`directories`](https://crates.io/crates/directories) crate) and persist across runs. They hold
+the hotkey, save folder, image format, theme, default snippet mode, capture timer, markup colour,
+UI language, and the opt-in Print Screen takeover. The exact path is shown at the bottom of the
+in-app **Settings** view.
