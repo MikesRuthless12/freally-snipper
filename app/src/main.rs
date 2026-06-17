@@ -4,6 +4,10 @@
 //! settings, and runs the Phase 1 capture flow (hide → snapshot → selection
 //! overlay → save). Editing and video features arrive in later phases.
 #![forbid(unsafe_code)]
+// Release builds are a GUI app: use the Windows subsystem so launching the .exe
+// doesn't open a console window (and closing a console can't kill the app). Debug
+// builds keep the console so the banner and any logs are visible.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
 mod delivery;
@@ -51,11 +55,19 @@ fn main() -> eframe::Result<()> {
 }
 
 /// Print the version banner to stdout (acceptance for build prompt P0.1).
+///
+/// Uses `writeln!` with the error ignored rather than `println!`: a release build
+/// is a Windows GUI app with no console, where `println!` would panic on the
+/// failed stdout write. In a terminal or debug build this still prints normally.
 fn print_banner() {
-    let version = env!("CARGO_PKG_VERSION");
-    println!("Freally Snipper v{version}");
-    println!("Free, local-first screen capture + image & light video editor.");
-    println!("(C) 2026 Mike Weaver - All Rights Reserved.");
+    use std::io::Write;
+    let mut out = std::io::stdout();
+    let _ = writeln!(out, "Freally Snipper v{}", env!("CARGO_PKG_VERSION"));
+    let _ = writeln!(
+        out,
+        "Free, local-first screen capture + image & light video editor."
+    );
+    let _ = writeln!(out, "(C) 2026 Mike Weaver - All Rights Reserved.");
 }
 
 /// Decode the embedded PNG into an egui window icon, trimming transparent margins

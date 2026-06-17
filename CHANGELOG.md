@@ -6,6 +6,14 @@ All notable changes to Freally Snipper are documented here. The format is based 
 
 ## [Unreleased]
 
+## [0.19.85] — 2026-06-17 — Windows release polish
+
+The downloaded Windows build now carries its icon and runs without a console window.
+
+### Fixed
+- The `.exe` shows the Freally Snipper icon in Explorer and the taskbar (embedded as a Win32 resource).
+- Launching the release no longer opens a console window, and closing a terminal can't quit the app — it's a GUI app now.
+
 ## [0.19.84] — 2026-06-17 — Home window
 
 The Windows-11-style home window, plus a system tray, an on-screen capture timer, a recent-captures gallery, full settings, an About panel, and the opt-in Print Screen takeover.

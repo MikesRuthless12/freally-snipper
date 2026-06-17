@@ -29,6 +29,11 @@ chrono = { version = "0.4.42", default-features = false, features = ["clock", "s
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52.0"
 
+# Windows-only build dependency: embed the app icon into the .exe so Explorer and
+# the taskbar show it (see build.rs).
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
 # Windows + macOS: system-tray icon so the app can keep running (and keep serving
 # the global hotkey / Print Screen) while its window is closed. Linux tray needs a
 # GTK loop that conflicts with our winit backend — deferred to Phase 7.
