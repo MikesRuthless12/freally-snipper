@@ -36,10 +36,9 @@ pub enum OverlayOutcome {
     Active,
     /// User cancelled (Esc / window close / ✕ on the action bar).
     Cancelled,
-    /// User committed a selection (no timer): the cropped RGBA capture plus the
-    /// selection's bounding rectangle in virtual pixels, so the editor hand-off
-    /// (P3.2) can position itself centered below the selection.
-    Captured { image: RgbaImage, region: VRect },
+    /// User committed a selection (no timer): the cropped RGBA capture, ready to
+    /// hand to delivery or the editor.
+    Captured { image: RgbaImage },
     /// User committed a selection but a Timer is set, so the pixels are grabbed
     /// later (after the countdown) — here is just the selection geometry, so the
     /// shot reflects how the screen looks *after* the delay.
@@ -52,17 +51,6 @@ pub enum Selection {
     Rect(VRect),
     /// Freeform lasso: the bounding box plus the path to mask outside it.
     Freeform { bbox: VRect, path: Vec<(i32, i32)> },
-}
-
-impl Selection {
-    /// The selection's bounding rectangle in virtual-desktop pixels — the region
-    /// the capture covers, used to anchor the editor below it (P3.2).
-    pub fn bbox(&self) -> VRect {
-        match self {
-            Selection::Rect(r) => *r,
-            Selection::Freeform { bbox, .. } => *bbox,
-        }
-    }
 }
 
 /// Live state for one capture session (one frozen snapshot + selection).
@@ -129,12 +117,6 @@ impl OverlaySession {
     /// button — written back to settings when the overlay ends.
     pub fn active_color(&self) -> [u8; 4] {
         self.active_color
-    }
-
-    /// The frozen desktop bounds this session covers (virtual pixels) — used to
-    /// host and anchor the editor hand-off.
-    pub fn desktop_bounds(&self) -> VRect {
-        self.composite.bounds
     }
 
     /// Opaque colour for the Freeform lasso outline, from the active markup colour.
@@ -532,9 +514,8 @@ impl OverlaySession {
         if self.defer {
             return OverlayOutcome::Selected(selection);
         }
-        let region = selection.bbox();
         match apply_selection(&self.composite, &selection) {
-            Some(image) => OverlayOutcome::Captured { image, region },
+            Some(image) => OverlayOutcome::Captured { image },
             None => OverlayOutcome::Active,
         }
     }
@@ -642,18 +623,6 @@ fn clear_alpha_span(img: &mut RgbaImage, y: u32, x0: i32, x1: i32) {
 mod tests {
     use super::*;
     use freally_capture::image::Rgba;
-
-    #[test]
-    fn selection_bbox_returns_capture_region() {
-        let r = VRect::new(10, 20, 30, 40);
-        assert_eq!(Selection::Rect(r).bbox(), r);
-        let bbox = VRect::new(-5, -5, 12, 12);
-        let free = Selection::Freeform {
-            bbox,
-            path: vec![(-5, -5), (7, -5), (7, 7)],
-        };
-        assert_eq!(free.bbox(), bbox);
-    }
 
     #[test]
     fn bounding_rect_covers_all_points() {

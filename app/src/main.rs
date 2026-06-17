@@ -11,7 +11,6 @@
 
 mod app;
 mod delivery;
-mod editor;
 mod gallery;
 mod hotkey;
 mod output;

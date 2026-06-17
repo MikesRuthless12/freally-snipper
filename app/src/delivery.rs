@@ -15,11 +15,16 @@ use freally_capture::image::RgbaImage;
 use crate::output;
 use crate::settings::ImageFormat;
 
-/// One capture to deliver (copy to clipboard + save to disk).
-struct Job {
-    image: RgbaImage,
-    folder: PathBuf,
-    format: ImageFormat,
+/// Work for the delivery thread.
+enum Job {
+    /// A finished capture: copy to the clipboard + save to disk.
+    Deliver {
+        image: RgbaImage,
+        folder: PathBuf,
+        format: ImageFormat,
+    },
+    /// Copy an image to the clipboard only (the editor's Copy action) — no save.
+    Copy { image: RgbaImage },
 }
 
 /// The outcome of one delivery: a human-readable status line plus, on a
@@ -57,7 +62,7 @@ impl Delivery {
     pub fn deliver(&self, image: RgbaImage, folder: PathBuf, format: ImageFormat) {
         if self
             .jobs
-            .send(Job {
+            .send(Job::Deliver {
                 image,
                 folder,
                 format,
@@ -65,6 +70,14 @@ impl Delivery {
             .is_err()
         {
             eprintln!("Freally Snipper: delivery worker is gone; capture not saved");
+        }
+    }
+
+    /// Queue an image for a clipboard-only copy (the editor's Copy action), no
+    /// file save. Returns immediately.
+    pub fn copy(&self, image: RgbaImage) {
+        if self.jobs.send(Job::Copy { image }).is_err() {
+            eprintln!("Freally Snipper: delivery worker is gone; copy not performed");
         }
     }
 
@@ -88,36 +101,55 @@ fn worker(jobs: &Receiver<Job>, results: &Sender<DeliveryResult>, ctx: &egui::Co
     };
 
     while let Ok(job) = jobs.recv() {
-        let (w, h) = (job.image.width(), job.image.height());
-
-        let clipboard_ok = match clipboard.as_mut() {
-            Some(cb) => match output::set_clipboard_image(cb, &job.image) {
-                Ok(()) => true,
-                Err(err) => {
-                    eprintln!("Freally Snipper: clipboard copy failed: {err}");
-                    false
+        let result = match job {
+            Job::Deliver {
+                image,
+                folder,
+                format,
+            } => {
+                let (w, h) = (image.width(), image.height());
+                let prefix = if copy_to_clipboard(clipboard.as_mut(), &image) {
+                    "Copied to clipboard · "
+                } else {
+                    "Clipboard unavailable · "
+                };
+                match output::save_capture(&image, &folder, format) {
+                    Ok(path) => DeliveryResult {
+                        message: format!("{prefix}saved {w} × {h} to {}", path.display()),
+                        saved_path: Some(path),
+                    },
+                    Err(err) => DeliveryResult {
+                        message: format!("{prefix}could not save file: {err}"),
+                        saved_path: None,
+                    },
                 }
-            },
-            None => false,
-        };
-        let prefix = if clipboard_ok {
-            "Copied to clipboard · "
-        } else {
-            "Clipboard unavailable · "
-        };
-
-        let result = match output::save_capture(&job.image, &job.folder, job.format) {
-            Ok(path) => DeliveryResult {
-                message: format!("{prefix}saved {w} × {h} to {}", path.display()),
-                saved_path: Some(path),
-            },
-            Err(err) => DeliveryResult {
-                message: format!("{prefix}could not save file: {err}"),
+            }
+            Job::Copy { image } => DeliveryResult {
+                message: if copy_to_clipboard(clipboard.as_mut(), &image) {
+                    "Copied to clipboard.".to_owned()
+                } else {
+                    "Clipboard unavailable.".to_owned()
+                },
                 saved_path: None,
             },
         };
 
         let _ = results.send(result);
         ctx.request_repaint();
+    }
+}
+
+/// Copy an image to the clipboard, returning whether it succeeded. Logs (but
+/// swallows) a clipboard error so a failed copy never takes down the worker.
+fn copy_to_clipboard(clipboard: Option<&mut arboard::Clipboard>, image: &RgbaImage) -> bool {
+    match clipboard {
+        Some(cb) => match output::set_clipboard_image(cb, image) {
+            Ok(()) => true,
+            Err(err) => {
+                eprintln!("Freally Snipper: clipboard copy failed: {err}");
+                false
+            }
+        },
+        None => false,
     }
 }

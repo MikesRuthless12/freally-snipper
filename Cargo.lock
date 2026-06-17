@@ -1422,6 +1422,10 @@ dependencies = [
 [[package]]
 name = "freally-editor"
 version = "0.30.0"
+dependencies = [
+ "egui",
+ "freally-capture",
+]
 
 [[package]]
 name = "freally-snipper"
@@ -1432,6 +1436,7 @@ dependencies = [
  "directories",
  "eframe",
  "freally-capture",
+ "freally-editor",
  "global-hotkey",
  "image",
  "opener",
