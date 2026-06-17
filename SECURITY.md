@@ -30,6 +30,11 @@ remediate before any public disclosure.
 
 - **Local-first:** the core never transmits your data. The only network actions are *optional and
   explicit* — model downloads (Whisper / translation / TTS) and user-initiated "Share"/export.
+- **Capture surface (Phase 1):** screen capture, the clipboard copy, and the saved image file all
+  stay **on your machine**. Captures are written only to the folder you choose (default
+  `Pictures/Freally Snipper`); filenames are program-generated (no path-traversal input). The
+  global capture hotkey is registered with the OS and chosen from a fixed preset list. No `unsafe`
+  code is used (`#![forbid(unsafe_code)]`).
 - **Third-party components** (see [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) carry their own
   advisories; we track and update them, and intend to run `cargo audit` / `cargo deny` in CI as the
   project matures.

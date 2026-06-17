@@ -8,17 +8,26 @@ require. Trademarks belong to their respective owners; listing here does not imp
 > Third-party components are kept **behind interfaces** so an owned implementation can replace them
 > later. This list grows as later phases add dependencies.
 
-## Currently bundled / linked (Phase 0)
+## Currently bundled / linked (through Phase 1)
 
 | Component | Role | License |
 |-----------|------|---------|
 | [`egui` / `eframe`](https://github.com/emilk/egui) | GUI framework | MIT OR Apache-2.0 |
-| [`image`](https://crates.io/crates/image) | image decoding (app icon) | MIT OR Apache-2.0 |
+| [`xcap`](https://crates.io/crates/xcap) | multi-monitor screen capture + window enumeration | Apache-2.0 |
+| [`image`](https://crates.io/crates/image) | image encode/decode (capture, save, icon) | MIT OR Apache-2.0 |
+| [`global-hotkey`](https://crates.io/crates/global-hotkey) | system-wide capture hotkey | Apache-2.0 OR MIT |
+| [`arboard`](https://crates.io/crates/arboard) | clipboard image copy | MIT OR Apache-2.0 |
+| [`rfd`](https://crates.io/crates/rfd) | native "save folder" picker dialog | MIT |
 | [`serde`](https://serde.rs) / [`serde_json`](https://crates.io/crates/serde_json) | settings (de)serialization | MIT OR Apache-2.0 |
 | [`directories`](https://crates.io/crates/directories) | OS config/data paths | MIT OR Apache-2.0 |
+| [`log`](https://crates.io/crates/log) | logging facade (capture crate) | MIT OR Apache-2.0 |
 
 Transitive Rust dependencies are MIT / Apache-2.0 / BSD / Zlib / MPL. Verify the full set with
 `cargo about` or `cargo deny` before any release.
+
+> **Linux note:** `rfd` uses the **XDG Desktop Portal** (D-Bus) for the folder picker and `xcap`
+> uses **PipeWire** for capture, so a Linux build links `libpipewire`, `libwayland`, `libxcb`, and
+> related system libraries (see `README.md` for the full `apt` list).
 
 ## Planned components (later phases — listed now for licensing clarity)
 

@@ -1,6 +1,6 @@
 [package]
 name = "freally-capture"
-description = "Screen capture (image) for Freally Snipper. Placeholder for Phase 1."
+description = "Multi-monitor screen capture (image) for Freally Snipper."
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -8,3 +8,7 @@ license-file.workspace = true
 publish = false
 
 [dependencies]
+# `xcap` re-exports the `image` crate it builds against, so downstream crates that
+# use `freally_capture::image` share the exact same `RgbaImage` type (no version skew).
+xcap = "0.9.6"
+log = "0.4"
