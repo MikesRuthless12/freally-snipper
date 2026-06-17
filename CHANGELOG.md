@@ -12,10 +12,10 @@ The Windows-11-style home window, plus a system tray, an on-screen capture timer
 
 ### Added
 - A toolbar (`+ New` · Camera · Video · Snippet ▾ · Timer ▾ · Color) starts a capture in the chosen mode.
-- With a Timer set, you select the region first, then a center-screen 5→1 countdown runs and the *live* screen is grabbed — so you can open a menu or arrange things during the delay.
-- A recent-captures strip shows uniform square thumbnails (whole image, decoded off-thread) with each capture's date/time, that reopen or reveal in their folder.
-- A system tray (Windows/macOS) keeps the app resident so the hotkey / Print Screen still capture while the window is closed; double-click or the menu reopens it, Quit exits.
-- Settings cover the hotkey, save folder, image format, theme, default mode, capture timer, markup colour, an 18-language UI picker (English first), a "show capture editor" toggle, and minimize-to-tray.
+- With a Timer, you select the region first, then a center-screen countdown runs and the live screen is grabbed.
+- A recent-captures strip shows uniform thumbnails of the whole image, each with its date and time.
+- A system tray (Windows/macOS) keeps the hotkey working while the window is closed; click the tray icon to reopen.
+- Settings cover the hotkey, save folder, format, theme, default mode, timer, colour, an 18-language picker, a "show editor" toggle, and minimize-to-tray.
 - An About panel shows the version, ownership, project-start date, and the embedded license + third-party notices.
 - Opt-in "Open Freally Snipper with Print Screen" (P1.5): Windows frees the key via the registry and restores it on disable; macOS/Linux get guided remap steps.
 - First public milestone, so it also ships the Phase 1 capture core (rectangle / window / freeform / full-screen snips, global hotkey, clipboard + save).
