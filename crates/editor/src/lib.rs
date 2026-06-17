@@ -22,8 +22,10 @@
 //! The editor is drawn into the app's single OS window (morphed to a decorated
 //! editor window), matching the one-window model the capture overlay already uses.
 
+mod download;
 mod emoji;
 mod filters;
+mod models;
 mod objects;
 mod ocr;
 mod raster;
@@ -51,9 +53,25 @@ enum TranslateMsg {
     },
 }
 
+/// Live state of a model download, shared with the Models panel (P4.11).
+enum DownloadState {
+    /// Streaming `file` of `files`, with byte/speed progress.
+    Active {
+        file: usize,
+        files: usize,
+        progress: download::Progress,
+    },
+    /// The download failed.
+    Failed(String),
+}
+
+/// Per-asset download state, shared between worker threads and the UI.
+type Downloads = Arc<Mutex<HashMap<&'static str, DownloadState>>>;
+
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::mpsc::Receiver;
+use std::sync::{Arc, Mutex};
 
 use egui::{Color32, PointerButton, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
 use freally_capture::image::RgbaImage;
@@ -294,6 +312,12 @@ pub struct EditorSession {
     translate_rx: Option<Receiver<TranslateMsg>>,
     pending_translate: Option<(f64, usize)>,
     translate_status: Option<String>,
+    /// Downloads / Models manager (P4.11): live per-asset download state, the
+    /// exact remote sizes once probed, panel visibility, and a one-shot probe flag.
+    downloads: Downloads,
+    model_sizes: Arc<Mutex<HashMap<&'static str, u64>>>,
+    show_models: bool,
+    size_probe_started: bool,
     /// In-progress stroke points, in image-pixel coordinates (empty = idle).
     stroke: Vec<Pos2>,
     /// Movable overlay objects (P4.3), drawn over the raster, baked on Save.
@@ -365,6 +389,10 @@ impl EditorSession {
             translate_rx: None,
             pending_translate: None,
             translate_status: None,
+            downloads: Arc::new(Mutex::new(HashMap::new())),
+            model_sizes: Arc::new(Mutex::new(HashMap::new())),
+            show_models: false,
+            size_probe_started: false,
             stroke: Vec::new(),
             objects: Vec::new(),
             selected: None,
@@ -456,9 +484,10 @@ impl EditorSession {
             });
         egui::CentralPanel::default().show_inside(ui, |ui| self.canvas(ui));
 
-        // Emoji picker window (P4.7) — floats over the editor.
+        // Floating windows (P4.7 emoji picker, P4.11 models/downloads manager).
         let ctx = ui.ctx().clone();
         self.emoji_picker_ui(&ctx);
+        self.models_panel_ui(&ctx);
 
         // Hand any completed OCR text to the app for the clipboard (only when no
         // other action fired this frame).
@@ -609,6 +638,14 @@ impl EditorSession {
                 .clicked()
             {
                 want_ocr = true;
+            }
+            ui.separator();
+            if ui
+                .button("Models…")
+                .on_hover_text("Download / manage the optional models (OCR, emoji, translate)")
+                .clicked()
+            {
+                self.show_models = true;
             }
         });
         if let Some(filter) = chosen_filter {
@@ -1600,10 +1637,18 @@ impl EditorSession {
         let (tx, rx) = std::sync::mpsc::channel();
         let image = self.image.clone();
         let ctx = ctx.clone();
+        let downloads = self.downloads.clone();
         let spawned = std::thread::Builder::new()
             .name("freally-ocr".to_owned())
             .spawn(move || {
-                let _ = tx.send(ocr::extract_text(&image));
+                let reporter = download_reporter(downloads.clone(), ctx.clone(), &models::OCR);
+                let result = ocr::extract_text(&image, reporter);
+                finish_download(
+                    &downloads,
+                    models::OCR.id,
+                    result.as_ref().map(|_| ()).map_err(|e| e.clone()),
+                );
+                let _ = tx.send(result);
                 ctx.request_repaint();
             });
         if spawned.is_ok() {
@@ -1649,18 +1694,33 @@ impl EditorSession {
         let (req_tx, req_rx) = std::sync::mpsc::channel::<TranslateReq>();
         let (msg_tx, msg_rx) = std::sync::mpsc::channel::<TranslateMsg>();
         let ctx = ctx.clone();
+        let downloads = self.downloads.clone();
         let spawned = std::thread::Builder::new()
             .name("freally-translate".to_owned())
             .spawn(move || {
                 let mut engine: Option<translate::Translator> = None;
                 let mut load_err: Option<String> = None;
                 while let Ok(req) = req_rx.recv() {
+                    // Coalesce a backlog: if the user kept typing, skip stale
+                    // requests and translate only the most recent (review #9).
+                    let mut req = req;
+                    while let Ok(newer) = req_rx.try_recv() {
+                        req = newer;
+                    }
                     if engine.is_none() && load_err.is_none() {
                         let _ = msg_tx.send(TranslateMsg::Loading);
                         ctx.request_repaint();
-                        match translate::Translator::load() {
-                            Ok(t) => engine = Some(t),
-                            Err(e) => load_err = Some(e),
+                        let reporter =
+                            download_reporter(downloads.clone(), ctx.clone(), &models::TRANSLATE);
+                        match translate::Translator::load(reporter) {
+                            Ok(t) => {
+                                engine = Some(t);
+                                finish_download(&downloads, models::TRANSLATE.id, Ok(()));
+                            }
+                            Err(e) => {
+                                finish_download(&downloads, models::TRANSLATE.id, Err(e.clone()));
+                                load_err = Some(e);
+                            }
                         }
                     }
                     let result = match (engine.as_mut(), &load_err) {
@@ -1765,6 +1825,144 @@ impl EditorSession {
         self.pending_translate = Some((now + 0.7, index));
     }
 
+    /// Pre-download an asset from the Models panel (P4.11), off the UI thread.
+    fn start_model_download(&mut self, asset: &'static models::Asset, ctx: &egui::Context) {
+        if let Ok(map) = self.downloads.lock() {
+            if matches!(map.get(asset.id), Some(DownloadState::Active { .. })) {
+                return; // already in flight
+            }
+        }
+        let downloads = self.downloads.clone();
+        let ctx = ctx.clone();
+        let _ = std::thread::Builder::new()
+            .name("freally-model-dl".to_owned())
+            .spawn(move || {
+                let reporter = download_reporter(downloads.clone(), ctx.clone(), asset);
+                let result = models::ensure(asset, reporter).map(|_| ());
+                finish_download(&downloads, asset.id, result);
+                ctx.request_repaint();
+            });
+    }
+
+    /// The Models / Downloads manager window (P4.11): explains each optional model,
+    /// shows its exact size + install state, and downloads it with a live progress
+    /// bar (%, amount of total, MB/s).
+    fn models_panel_ui(&mut self, ctx: &egui::Context) {
+        if !self.show_models {
+            return;
+        }
+        // One-shot: fetch the exact remote size of each not-installed asset (HEAD).
+        if !self.size_probe_started {
+            self.size_probe_started = true;
+            let sizes = self.model_sizes.clone();
+            let probe_ctx = ctx.clone();
+            let _ = std::thread::Builder::new()
+                .name("freally-model-sizes".to_owned())
+                .spawn(move || {
+                    for asset in models::ALL {
+                        if !models::is_installed(asset) {
+                            if let Ok(n) = models::remote_size(asset) {
+                                if let Ok(mut m) = sizes.lock() {
+                                    m.insert(asset.id, n);
+                                }
+                                probe_ctx.request_repaint();
+                            }
+                        }
+                    }
+                });
+        }
+
+        let mut open = self.show_models;
+        let mut start: Option<&'static models::Asset> = None;
+        egui::Window::new("Models / Downloads")
+            .open(&mut open)
+            .default_width(460.0)
+            .show(ctx, |ui| {
+                ui.label("Optional add-ons download on demand and install to your cache folder.");
+                for asset in models::ALL {
+                    ui.separator();
+                    ui.strong(asset.title);
+                    ui.label(asset.description);
+
+                    // Snapshot this asset's live download state out of the lock.
+                    let state = self
+                        .downloads
+                        .lock()
+                        .ok()
+                        .and_then(|m| match m.get(asset.id) {
+                            Some(DownloadState::Active {
+                                file,
+                                files,
+                                progress,
+                            }) => Some(Ok((*file, *files, *progress))),
+                            Some(DownloadState::Failed(e)) => Some(Err(e.clone())),
+                            None => None,
+                        });
+
+                    match state {
+                        Some(Ok((file, files, p))) => {
+                            let frac = match p.total {
+                                Some(t) if t > 0 => (p.done as f32 / t as f32).clamp(0.0, 1.0),
+                                _ => 0.0,
+                            };
+                            ui.add(egui::ProgressBar::new(frac).show_percentage());
+                            let total = p
+                                .total
+                                .map(download::fmt_bytes)
+                                .unwrap_or_else(|| "?".to_owned());
+                            let which = if files > 1 {
+                                format!("file {}/{} · ", file + 1, files)
+                            } else {
+                                String::new()
+                            };
+                            ui.label(format!(
+                                "{which}{} of {} · {}",
+                                download::fmt_bytes(p.done),
+                                total,
+                                download::fmt_speed(p.bytes_per_sec),
+                            ));
+                        }
+                        Some(Err(e)) => {
+                            ui.colored_label(
+                                Color32::from_rgb(220, 80, 80),
+                                format!("Failed: {e}"),
+                            );
+                            if ui.button("Retry").clicked() {
+                                start = Some(asset);
+                            }
+                        }
+                        None => {
+                            if models::is_installed(asset) {
+                                ui.label(format!(
+                                    "Installed · {} on disk",
+                                    download::fmt_bytes(models::installed_size(asset))
+                                ));
+                            } else {
+                                let size = self
+                                    .model_sizes
+                                    .lock()
+                                    .ok()
+                                    .and_then(|m| m.get(asset.id).copied());
+                                let size_txt = size
+                                    .map(download::fmt_bytes)
+                                    .unwrap_or_else(|| "checking…".to_owned());
+                                ui.horizontal(|ui| {
+                                    if ui.button("Download").clicked() {
+                                        start = Some(asset);
+                                    }
+                                    ui.label(format!("Download size: {size_txt}"));
+                                });
+                            }
+                        }
+                    }
+                }
+            });
+        self.show_models = open;
+        if let Some(asset) = start {
+            self.start_model_download(asset, ctx);
+        }
+    }
+
     /// Pick an image file and drop it as a centred, selected overlay object (P4.8).
     fn insert_image(&mut self) {
         let Some(path) = rfd::FileDialog::new()
@@ -1823,10 +2021,18 @@ impl EditorSession {
         }
         let (tx, rx) = std::sync::mpsc::channel();
         let ctx = ctx.clone();
+        let downloads = self.downloads.clone();
         if std::thread::Builder::new()
             .name("freally-emoji".to_owned())
             .spawn(move || {
-                let _ = tx.send(emoji::ensure_font());
+                let reporter = download_reporter(downloads.clone(), ctx.clone(), &models::EMOJI);
+                let result = emoji::ensure_font(reporter);
+                finish_download(
+                    &downloads,
+                    models::EMOJI.id,
+                    result.as_ref().map(|_| ()).map_err(|e| e.clone()),
+                );
+                let _ = tx.send(result);
                 ctx.request_repaint();
             })
             .is_ok()
@@ -2067,6 +2273,7 @@ fn language_combo(ui: &mut egui::Ui, id: &str, selected: &mut Option<String>) ->
     let mut changed = false;
     let popup_id = egui::Id::new(id).with("popup");
     let filter_id = egui::Id::new(id).with("filter");
+    let focused_id = egui::Id::new(id).with("focused");
     let current = selected
         .as_deref()
         .map(translate::target_label)
@@ -2075,7 +2282,10 @@ fn language_combo(ui: &mut egui::Ui, id: &str, selected: &mut Option<String>) ->
     // "Translate to" label precedes it, so it reads as a picker.
     let button = ui.button(current);
     if button.clicked() {
-        ui.memory_mut(|m| m.data.insert_temp(filter_id, String::new())); // fresh search each open
+        ui.memory_mut(|m| {
+            m.data.insert_temp(filter_id, String::new()); // fresh search each open
+            m.data.insert_temp(focused_id, false); // re-focus the search box on open
+        });
     }
     egui::Popup::menu(&button)
         .id(popup_id)
@@ -2085,12 +2295,16 @@ fn language_combo(ui: &mut egui::Ui, id: &str, selected: &mut Option<String>) ->
             let mut filter = ui
                 .memory(|m| m.data.get_temp::<String>(filter_id))
                 .unwrap_or_default();
-            ui.add(
+            let search = ui.add(
                 egui::TextEdit::singleline(&mut filter)
                     .hint_text("Type to filter…")
                     .desired_width(190.0),
-            )
-            .request_focus(); // keep focus in the search box for type-to-filter
+            );
+            // Focus the search box once, the frame the popup opens (review #16).
+            if !ui.memory(|m| m.data.get_temp::<bool>(focused_id).unwrap_or(false)) {
+                search.request_focus();
+                ui.memory_mut(|m| m.data.insert_temp(focused_id, true));
+            }
             ui.memory_mut(|m| m.data.insert_temp(filter_id, filter.clone()));
             ui.separator();
             let q = filter.trim().to_lowercase();
@@ -2124,6 +2338,43 @@ fn language_combo(ui: &mut egui::Ui, id: &str, selected: &mut Option<String>) ->
             }
         });
     changed
+}
+
+/// Build an `on_progress` closure that records a download's live progress into the
+/// shared map and wakes the UI (P4.11).
+fn download_reporter(
+    downloads: Downloads,
+    ctx: egui::Context,
+    asset: &'static models::Asset,
+) -> impl FnMut(usize, download::Progress) {
+    move |file, progress| {
+        if let Ok(mut map) = downloads.lock() {
+            map.insert(
+                asset.id,
+                DownloadState::Active {
+                    file,
+                    files: asset.files.len(),
+                    progress,
+                },
+            );
+        }
+        ctx.request_repaint();
+    }
+}
+
+/// Clear (on success) or mark failed (on error) a download's entry when its worker
+/// finishes (P4.11). On success the panel derives "installed" from disk.
+fn finish_download(downloads: &Downloads, asset_id: &'static str, result: Result<(), String>) {
+    if let Ok(mut map) = downloads.lock() {
+        match result {
+            Ok(()) => {
+                map.remove(asset_id);
+            }
+            Err(e) => {
+                map.insert(asset_id, DownloadState::Failed(e));
+            }
+        }
+    }
 }
 
 /// Content key for the text-stamp cache (string + size + family + colour), so the

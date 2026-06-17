@@ -12,7 +12,6 @@
 //! Translation *quality* is verified interactively (no GPU/model here to self-test).
 
 use std::fs::File;
-use std::path::PathBuf;
 
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
@@ -20,38 +19,11 @@ use candle_transformers::generation::LogitsProcessor;
 use candle_transformers::models::t5;
 use tokenizers::Tokenizer;
 
-/// Hugging Face repo with candle-ready MADLAD-400-3B-mt weights (Apache-2.0).
-const REPO_BASE: &str = "https://huggingface.co/jbochi/madlad400-3b-mt/resolve/main";
+use crate::download::Progress;
+use crate::models;
+
 /// Cap generated tokens so a runaway decode can't hang.
 const MAX_NEW_TOKENS: usize = 512;
-
-fn cache_dir() -> Result<PathBuf, String> {
-    directories::ProjectDirs::from("com", "Havoc Software", "Freally Snipper")
-        .map(|d| d.cache_dir().join("madlad400-3b-mt"))
-        .ok_or_else(|| "no cache directory available".to_owned())
-}
-
-/// Download `name` from the model repo to the cache if missing (streamed, so the
-/// ~3 GB weights file never sits fully in RAM). Returns the local path.
-fn ensure_file(name: &str) -> Result<PathBuf, String> {
-    let path = cache_dir()?.join(name);
-    if path.exists() {
-        return Ok(path);
-    }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("create cache dir: {e}"))?;
-    }
-    let url = format!("{REPO_BASE}/{name}");
-    let mut response = ureq::get(&url)
-        .call()
-        .map_err(|e| format!("download {name}: {e}"))?;
-    let tmp = path.with_extension("part");
-    let mut reader = response.body_mut().as_reader();
-    let mut file = File::create(&tmp).map_err(|e| format!("create {name}: {e}"))?;
-    std::io::copy(&mut reader, &mut file).map_err(|e| format!("download {name}: {e}"))?;
-    std::fs::rename(&tmp, &path).map_err(|e| format!("finalize {name}: {e}"))?;
-    Ok(path)
-}
 
 /// A loaded MADLAD translator. Lives on the editor's translate worker thread.
 pub struct Translator {
@@ -62,23 +34,24 @@ pub struct Translator {
 }
 
 impl Translator {
-    /// Download (if needed) + load the model. **Blocking + slow** — worker thread only.
-    pub fn load() -> Result<Translator, String> {
-        let config_path = ensure_file("config.json")?;
-        let tokenizer_path = ensure_file("tokenizer.json")?;
-        let weights_path = ensure_file("model.safetensors")?;
+    /// Download (if needed) + load the model, reporting download progress.
+    /// **Blocking + slow** — worker thread only.
+    pub fn load(on_progress: impl FnMut(usize, Progress)) -> Result<Translator, String> {
+        // `paths` is in TRANSLATE.files order: [config.json, tokenizer.json, weights].
+        let paths = models::ensure(&models::TRANSLATE, on_progress)?;
 
         let config: t5::Config = serde_json::from_reader(
-            File::open(&config_path).map_err(|e| format!("open config: {e}"))?,
+            File::open(&paths[0]).map_err(|e| format!("open config: {e}"))?,
         )
         .map_err(|e| format!("parse config: {e}"))?;
         let tokenizer =
-            Tokenizer::from_file(&tokenizer_path).map_err(|e| format!("load tokenizer: {e}"))?;
+            Tokenizer::from_file(&paths[1]).map_err(|e| format!("load tokenizer: {e}"))?;
 
         let device = Device::Cpu;
-        // SAFETY: mmap of a file we just wrote; candle requires unsafe for mmap.
+        // SAFETY: mmap of a file we just wrote into our private cache; candle
+        // requires unsafe for mmap. Pinned to an immutable revision (see models.rs).
         let vb = unsafe {
-            VarBuilder::from_mmaped_safetensors(&[weights_path], DType::F32, &device)
+            VarBuilder::from_mmaped_safetensors(&[paths[2].clone()], DType::F32, &device)
                 .map_err(|e| format!("load weights: {e}"))?
         };
         let model = t5::T5ForConditionalGeneration::load(vb, &config)

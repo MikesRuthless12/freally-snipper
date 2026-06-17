@@ -7,48 +7,22 @@
 //! — so the build stays light. `rustybuzz` shapes the emoji string first, so
 //! multi-codepoint ZWJ sequences (e.g. 👨‍👩‍👧) resolve to the right ligature glyph.
 
-use std::fs;
-use std::path::PathBuf;
-
 use freally_capture::image::RgbaImage;
 use rustybuzz::{Face, UnicodeBuffer};
 use swash::scale::{ScaleContext, StrikeWith};
 use swash::FontRef;
 
-/// Noto Color Emoji (OFL; see THIRD-PARTY-NOTICES.md). CBDT bitmap colour font.
-const FONT_URL: &str =
-    "https://github.com/googlefonts/noto-emoji/raw/main/fonts/NotoColorEmoji.ttf";
+use crate::download::Progress;
+use crate::models;
+
 /// Strike size requested from the bitmap font (Noto's strike is ~128 px).
 const EMOJI_PX: f32 = 128.0;
 
-fn font_path() -> Result<PathBuf, String> {
-    directories::ProjectDirs::from("com", "Havoc Software", "Freally Snipper")
-        .map(|d| d.cache_dir().join("emoji").join("NotoColorEmoji.ttf"))
-        .ok_or_else(|| "no cache directory available".to_owned())
-}
-
-/// Download the emoji font if missing, then return its bytes. **Blocking + slow**
-/// (the font is ~24 MB) — call off the UI thread.
-pub fn ensure_font() -> Result<Vec<u8>, String> {
-    let path = font_path()?;
-    if !path.exists() {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("create cache dir: {e}"))?;
-        }
-        let mut response = ureq::get(FONT_URL)
-            .call()
-            .map_err(|e| format!("download emoji font: {e}"))?;
-        let bytes = response
-            .body_mut()
-            .with_config()
-            .limit(128 * 1024 * 1024)
-            .read_to_vec()
-            .map_err(|e| format!("read emoji font: {e}"))?;
-        let tmp = path.with_extension("part");
-        fs::write(&tmp, &bytes).map_err(|e| format!("write emoji font: {e}"))?;
-        fs::rename(&tmp, &path).map_err(|e| format!("finalize emoji font: {e}"))?;
-    }
-    fs::read(&path).map_err(|e| format!("read emoji font: {e}"))
+/// Download the emoji font on demand (see [`crate::models`]) and return its bytes,
+/// reporting download progress. **Blocking + slow** (~24 MB) — call off the UI thread.
+pub fn ensure_font(on_progress: impl FnMut(usize, Progress)) -> Result<Vec<u8>, String> {
+    let paths = models::ensure(&models::EMOJI, on_progress)?;
+    std::fs::read(&paths[0]).map_err(|e| format!("read emoji font: {e}"))
 }
 
 /// Rasterize `emoji` to a colour [`RgbaImage`] using `font_bytes`. Fast + sync.
