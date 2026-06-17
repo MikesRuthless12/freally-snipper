@@ -36,8 +36,20 @@ pub enum OverlayOutcome {
     Active,
     /// User cancelled (Esc / window close / empty click in some modes).
     Cancelled,
-    /// User committed a selection; here is the cropped RGBA capture.
+    /// User committed a selection; here is the cropped RGBA capture (no timer).
     Captured(RgbaImage),
+    /// User committed a selection but a Timer is set, so the pixels are grabbed
+    /// later (after the countdown) — here is just the selection geometry, so the
+    /// shot reflects how the screen looks *after* the delay.
+    Selected(Selection),
+}
+
+/// A committed selection whose pixels are captured after a Timer countdown.
+pub enum Selection {
+    /// Rectangle / window / full-screen bounds.
+    Rect(VRect),
+    /// Freeform lasso: the bounding box plus the path to mask outside it.
+    Freeform { bbox: VRect, path: Vec<(i32, i32)> },
 }
 
 /// Live state for one capture session (one frozen snapshot + selection).
@@ -50,6 +62,12 @@ pub struct OverlaySession {
     drag_start: Option<(i32, i32)>,
     /// Freeform lasso points, in virtual pixels.
     lasso: Vec<(i32, i32)>,
+    /// When a Timer is set, commit the selection geometry instead of cropping the
+    /// frozen snapshot now — the app re-captures the live screen after the
+    /// countdown. `false` (Timer Off) keeps the original crop-now behavior.
+    defer: bool,
+    /// Colour for the Freeform lasso outline — the toolbar's active markup colour.
+    outline: Color32,
 }
 
 impl OverlaySession {
@@ -59,6 +77,8 @@ impl OverlaySession {
         composite: Composite,
         mode: SnippetMode,
         windows: Vec<WindowInfo>,
+        defer: bool,
+        outline: Color32,
     ) -> Self {
         let size = [
             composite.image.width() as usize,
@@ -73,6 +93,8 @@ impl OverlaySession {
             windows,
             drag_start: None,
             lasso: Vec::new(),
+            defer,
+            outline,
         }
     }
 
@@ -314,7 +336,8 @@ impl OverlaySession {
             return;
         }
         // Map points to screen space on the fly (no per-frame Vec allocation).
-        let stroke = Stroke::new(2.0, Color32::from_rgb(255, 210, 60));
+        // Outline drawn in the toolbar's active markup colour.
+        let stroke = Stroke::new(2.0, self.outline);
         let first = self.to_screen(draw, first_v);
         let mut prev = first;
         for &v in rest {
@@ -333,10 +356,7 @@ impl OverlaySession {
         if r.width < 2 || r.height < 2 {
             return OverlayOutcome::Active; // too small — ignore, keep selecting
         }
-        match freally_capture::crop_composite(&self.composite, r) {
-            Ok(img) => OverlayOutcome::Captured(img),
-            Err(_) => OverlayOutcome::Active,
-        }
+        self.commit(Selection::Rect(r))
     }
 
     fn commit_lasso(&mut self) -> OverlayOutcome {
@@ -347,18 +367,37 @@ impl OverlaySession {
         if bbox.width < 2 || bbox.height < 2 {
             return OverlayOutcome::Active;
         }
-        match freally_capture::crop_composite(&self.composite, bbox) {
-            Ok(mut img) => {
-                // `crop_composite` clips `bbox` to the desktop, so mask in that
-                // same clipped frame — the returned image's top-left is the
-                // intersection origin, not necessarily `bbox`'s.
-                let origin = bbox
-                    .intersection(&self.composite.bounds)
-                    .map_or((bbox.x, bbox.y), |c| (c.x, c.y));
-                mask_to_polygon(&mut img, &path, origin);
-                OverlayOutcome::Captured(img)
-            }
-            Err(_) => OverlayOutcome::Active,
+        self.commit(Selection::Freeform { bbox, path })
+    }
+
+    /// Finish a selection: with a Timer, hand back the geometry (the app grabs
+    /// live pixels after the countdown); otherwise crop/mask the frozen snapshot
+    /// now. Both paths share [`apply_selection`] so the crop+mask logic lives once.
+    fn commit(&self, selection: Selection) -> OverlayOutcome {
+        if self.defer {
+            return OverlayOutcome::Selected(selection);
+        }
+        match apply_selection(&self.composite, &selection) {
+            Some(img) => OverlayOutcome::Captured(img),
+            None => OverlayOutcome::Active,
+        }
+    }
+}
+
+/// Apply a committed [`Selection`] to a freshly captured (live) composite,
+/// producing the final cropped/masked RGBA. Used for timed captures, where the
+/// pixels are grabbed *after* the countdown rather than from the frozen snapshot,
+/// so the shot reflects whatever the user arranged during the delay.
+pub fn apply_selection(composite: &Composite, selection: &Selection) -> Option<RgbaImage> {
+    match selection {
+        Selection::Rect(r) => freally_capture::crop_composite(composite, *r).ok(),
+        Selection::Freeform { bbox, path } => {
+            let mut img = freally_capture::crop_composite(composite, *bbox).ok()?;
+            let origin = bbox
+                .intersection(&composite.bounds)
+                .map_or((bbox.x, bbox.y), |c| (c.x, c.y));
+            mask_to_polygon(&mut img, path, origin);
+            Some(img)
         }
     }
 }

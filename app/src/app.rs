@@ -20,11 +20,12 @@ use freally_capture::{Composite, Rect as VRect, WindowInfo};
 use crate::delivery::Delivery;
 use crate::gallery::Gallery;
 use crate::hotkey::Hotkeys;
-use crate::overlay::{OverlayOutcome, OverlaySession};
+use crate::overlay::{apply_selection, OverlayOutcome, OverlaySession, Selection};
 use crate::print_screen::{self, KeyOutcome};
 use crate::settings::{
     language_label, ImageFormat, Settings, SnippetMode, Theme, TimerDelay, UI_LANGUAGES,
 };
+use crate::tray::{Tray, TrayCommand};
 
 /// Delay between hiding the home window and grabbing the screen, so the window is
 /// actually gone from the shot before the snapshot is taken. The user's Timer ▾
@@ -73,22 +74,51 @@ pub struct FreallySnipperApp {
     /// pointer is held (e.g. dragging the colour picker) and flushed on release,
     /// so a drag doesn't rewrite settings.json every frame.
     needs_persist: bool,
+    /// System-tray icon (Windows/macOS) that keeps the app resident — so the
+    /// global hotkey / Print Screen still work — while the window is closed.
+    /// `None` if unavailable (e.g. Linux, or creation failed).
+    tray: Option<Tray>,
+    /// Set when the user chose Quit from the tray, so the next close actually exits
+    /// instead of hiding to the tray.
+    quitting: bool,
+    /// True while the window is hidden in the tray, so a capture taken via the
+    /// hotkey returns to the tray instead of popping the window back up.
+    hidden_to_tray: bool,
 }
 
 enum CaptureState {
     Idle,
-    /// Home window hidden; waiting `delay` (hide settle + Timer ▾) before the snapshot.
+    /// Home window hidden; waiting `HIDE_DELAY` (hide settle) before grabbing the
+    /// frozen snapshot used for the selection overlay / an immediate capture.
     Arming {
         mode: SnippetMode,
         since: Instant,
-        delay: Duration,
     },
-    /// Overlay is live with a frozen snapshot.
+    /// Selection overlay is live with a frozen snapshot.
     Active(Box<OverlaySession>),
+    /// A visible countdown badge is showing before the *live* snapshot (Timer ▾).
+    /// `selection` is `None` for full screen (re-grab the whole desktop) or the
+    /// chosen region for Rectangle / Window / Freeform — grabbed live after the
+    /// countdown so the shot reflects whatever the user set up during the delay.
+    Counting {
+        since: Instant,
+        total: Duration,
+        selection: Option<Selection>,
+    },
+    /// Badge hidden; waiting `HIDE_DELAY` before grabbing the *live* desktop for a
+    /// timed capture (then crop/mask to `selection`, or keep the whole desktop).
+    GrabbingLive {
+        selection: Option<Selection>,
+        since: Instant,
+    },
 }
 
 impl FreallySnipperApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, mut settings: Settings) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        mut settings: Settings,
+        icon: Option<egui::IconData>,
+    ) -> Self {
         apply_theme(&cc.egui_ctx, settings.theme);
 
         let mut hotkeys = Hotkeys::new(&cc.egui_ctx);
@@ -101,8 +131,14 @@ impl FreallySnipperApp {
                 ));
             }
             // Re-register Print Screen if the user previously opted in (P1.5).
-            if settings.open_with_print_screen {
-                h.set_print_screen(true);
+            // Surface a failure: VK_SNAPSHOT can be refused until Windows releases
+            // the Snipping Tool's claim on the key (often needs a sign-out).
+            if settings.open_with_print_screen && !h.set_print_screen(true) {
+                status = Some(
+                    "Print Screen couldn't be registered — another app may hold it, or Windows \
+                     needs a sign-out to release it. The capture hotkey and + New still work."
+                        .to_owned(),
+                );
             }
         }
 
@@ -110,6 +146,14 @@ impl FreallySnipperApp {
         let before = settings.recent_captures.len();
         settings.prune_recent();
         let pruned = settings.recent_captures.len() != before;
+
+        // System tray (Windows/macOS) reuses the app icon, but pre-scaled to a
+        // small, crisp square — Windows renders the tray slot at ~16–32px, and
+        // letting it crush the full-res icon there looks distorted/blurry.
+        let tray = icon.and_then(|icon| {
+            let (rgba, w, h) = tray_icon_rgba(&icon, 64);
+            Tray::new(&cc.egui_ctx, rgba, w, h, settings.minimize_to_tray)
+        });
 
         let app = Self {
             settings,
@@ -122,6 +166,9 @@ impl FreallySnipperApp {
             view: HomeView::Capture,
             print_screen_guidance: None,
             needs_persist: false,
+            tray,
+            quitting: false,
+            hidden_to_tray: false,
         };
         if pruned {
             app.persist();
@@ -136,18 +183,36 @@ impl FreallySnipperApp {
     }
 
     /// Start a capture: remember the home position, hide the chrome, then arm
-    /// (hide settle + the Timer ▾ delay) before the snapshot is taken.
+    /// (hide settle) before the frozen snapshot. The Timer ▾ countdown — when set
+    /// — runs *after* the selection, so the user picks the region first, then the
+    /// screen is grabbed live after the delay.
     fn begin_capture(&mut self, ctx: &egui::Context, mode: SnippetMode) {
         if !matches!(self.capture, CaptureState::Idle) {
             return;
         }
         self.status = None;
-        self.home_pos = ctx.input(|i| i.viewport().outer_rect).map(|r| r.min);
+        // Keep the last known home position: when triggered from the tray the
+        // window is hidden, so `outer_rect` is None — don't overwrite a good value.
+        self.home_pos = ctx
+            .input(|i| i.viewport().outer_rect)
+            .map(|r| r.min)
+            .or(self.home_pos);
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         self.capture = CaptureState::Arming {
             mode,
             since: Instant::now(),
-            delay: HIDE_DELAY + self.settings.timer_delay.duration(),
+        };
+        ctx.request_repaint();
+    }
+
+    /// Begin the Timer ▾ countdown (morph to the badge), to be followed by the
+    /// live snapshot. `selection` is `None` for full screen, else the region.
+    fn start_countdown(&mut self, ctx: &egui::Context, selection: Option<Selection>) {
+        morph_to_countdown_badge(ctx, screen_center(ctx));
+        self.capture = CaptureState::Counting {
+            since: Instant::now(),
+            total: self.settings.timer_delay.duration(),
+            selection,
         };
         ctx.request_repaint();
     }
@@ -167,7 +232,13 @@ impl FreallySnipperApp {
                 }
             }
             if let Some(last) = results.last() {
-                self.status = Some(last.message.clone());
+                let mut message = last.message.clone();
+                // The editor (Toolbar 2) lands in Phase 4; until then, note where
+                // it will open so the "Show capture editor" toggle is observable.
+                if self.settings.show_capture_editor && last.saved_path.is_some() {
+                    message.push_str(" · editor opens here in Phase 4");
+                }
+                self.status = Some(message);
             }
             if recents_changed {
                 self.persist();
@@ -183,37 +254,141 @@ impl FreallySnipperApp {
             self.begin_capture(ctx, self.settings.default_snippet_mode);
         }
 
+        // System tray (Windows/macOS): act on Open / Quit commands — but only while
+        // idle, so a tray click during a capture can't pop the window into the shot
+        // or cancel a quit mid-snip (commands queue and run once the capture ends).
+        if matches!(self.capture, CaptureState::Idle) {
+            match self.tray.as_ref().and_then(Tray::poll) {
+                Some(TrayCommand::Open) => {
+                    self.hidden_to_tray = false;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                }
+                Some(TrayCommand::Quit) => {
+                    self.quitting = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+                None => {}
+            }
+        }
+        // With minimize-to-tray on, the window's close button hides it (keeping the
+        // hotkey alive) rather than quitting — unless Quit was chosen from the tray.
+        if matches!(self.capture, CaptureState::Idle)
+            && self.settings.minimize_to_tray
+            && self.tray.is_some()
+            && !self.quitting
+            && ctx.input(|i| i.viewport().close_requested())
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            self.hidden_to_tray = true;
+        }
+
         match &self.capture {
             CaptureState::Idle => {}
-            CaptureState::Arming { mode, since, delay } => {
+            CaptureState::Arming { mode, since } => {
                 let mode = *mode;
-                if since.elapsed() < *delay {
-                    // Sleep until the snapshot is due instead of busy-repainting
-                    // every frame through the (up to 10 s) Timer countdown.
-                    ctx.request_repaint_after(*delay - since.elapsed());
+                if since.elapsed() < HIDE_DELAY {
+                    // Drive the wait with an unconditional repaint: the home window
+                    // is hidden here, and a hidden eframe viewport does NOT reliably
+                    // honor request_repaint_after, so anything else makes the overlay
+                    // take "forever" to appear.
+                    ctx.request_repaint();
                     return;
                 }
-                match capture_desktop() {
-                    Ok((composite, windows)) => {
-                        if mode == SnippetMode::FullScreen {
-                            // No overlay needed — the whole desktop is the capture
-                            // (move the stitched image out, no extra copy).
-                            self.finish(ctx, Some(composite.into_image()));
-                        } else {
-                            let bounds = composite.bounds;
-                            let session = OverlaySession::new(ctx, composite, mode, windows);
-                            self.capture = CaptureState::Active(Box::new(session));
-                            morph_to_overlay(ctx, bounds);
-                            ctx.request_repaint();
-                        }
-                    }
-                    Err(err) => self.fail(ctx, err.to_string()),
-                }
+                self.snapshot_after_arming(ctx, mode);
             }
             CaptureState::Active(_) => {
                 // Rendering + input happen in `ui`; just keep frames flowing.
                 ctx.request_repaint();
             }
+            CaptureState::Counting { since, total, .. } => {
+                if since.elapsed() < *total {
+                    // The badge is visible; wake a few times a second (enough for a
+                    // 1 Hz digit) instead of busy-repainting at the refresh rate.
+                    ctx.request_repaint_after(std::time::Duration::from_millis(200));
+                    return;
+                }
+                // Countdown done: hide the badge and settle before the live grab,
+                // so the badge never lands in the shot.
+                let selection = match std::mem::replace(&mut self.capture, CaptureState::Idle) {
+                    CaptureState::Counting { selection, .. } => selection,
+                    _ => None,
+                };
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                self.capture = CaptureState::GrabbingLive {
+                    selection,
+                    since: Instant::now(),
+                };
+                ctx.request_repaint();
+            }
+            CaptureState::GrabbingLive { since, .. } => {
+                if since.elapsed() < HIDE_DELAY {
+                    ctx.request_repaint();
+                    return;
+                }
+                self.grab_live(ctx);
+            }
+        }
+    }
+
+    /// After the hide settle: grab the frozen desktop, then either capture
+    /// immediately (full screen, Timer Off), open the selection overlay, or — for
+    /// full screen *with* a Timer — start the countdown to a live grab.
+    fn snapshot_after_arming(&mut self, ctx: &egui::Context, mode: SnippetMode) {
+        let timed = self.settings.timer_delay != TimerDelay::None;
+        // Full screen + Timer needs no frozen snapshot (there's no selection) —
+        // count down, then grab the live desktop. Skip the wasted full grab here.
+        if mode == SnippetMode::FullScreen && timed {
+            self.start_countdown(ctx, None);
+            return;
+        }
+        match capture_desktop() {
+            Ok((composite, windows)) => {
+                if mode == SnippetMode::FullScreen {
+                    self.finish(ctx, Some(composite.into_image()));
+                } else {
+                    let bounds = composite.bounds;
+                    // Freeform outline uses the toolbar's active markup colour.
+                    let outline = egui::Color32::from_rgb(
+                        self.settings.active_color[0],
+                        self.settings.active_color[1],
+                        self.settings.active_color[2],
+                    );
+                    let session =
+                        OverlaySession::new(ctx, composite, mode, windows, timed, outline);
+                    self.capture = CaptureState::Active(Box::new(session));
+                    morph_to_overlay(ctx, bounds);
+                    ctx.request_repaint();
+                }
+            }
+            Err(err) => self.fail(ctx, err.to_string()),
+        }
+    }
+
+    /// After the Timer countdown (and badge hide): grab the *live* desktop and
+    /// produce the final image — the whole desktop, or the chosen region
+    /// cropped/masked from the live grab.
+    fn grab_live(&mut self, ctx: &egui::Context) {
+        let selection = match std::mem::replace(&mut self.capture, CaptureState::Idle) {
+            CaptureState::GrabbingLive { selection, .. } => selection,
+            other => {
+                self.capture = other;
+                return;
+            }
+        };
+        match capture_desktop() {
+            Ok((composite, _windows)) => {
+                let image = match &selection {
+                    Some(sel) => apply_selection(&composite, sel),
+                    None => Some(composite.into_image()),
+                };
+                match image {
+                    Some(img) => self.finish(ctx, Some(img)),
+                    None => self.fail(ctx, "Selection produced no image.".to_owned()),
+                }
+            }
+            Err(err) => self.fail(ctx, err.to_string()),
         }
     }
 
@@ -239,6 +414,8 @@ impl FreallySnipperApp {
             OverlayOutcome::Active => ctx.request_repaint(),
             OverlayOutcome::Cancelled => self.finish(&ctx, None),
             OverlayOutcome::Captured(img) => self.finish(&ctx, Some(img)),
+            // Timer set: selection chosen, now run the countdown then grab live.
+            OverlayOutcome::Selected(selection) => self.start_countdown(&ctx, Some(selection)),
         }
     }
 
@@ -247,7 +424,7 @@ impl FreallySnipperApp {
     /// capture was cancelled. Returns immediately so the UI never blocks.
     fn finish(&mut self, ctx: &egui::Context, image: Option<RgbaImage>) {
         self.capture = CaptureState::Idle;
-        restore_home(ctx, self.home_pos);
+        restore_home(ctx, self.home_pos, !self.hidden_to_tray);
         match image {
             None => self.status = Some("Capture cancelled.".to_owned()),
             Some(img) if img.width() == 0 || img.height() == 0 => {
@@ -268,9 +445,54 @@ impl FreallySnipperApp {
     /// Abort a capture after a backend failure, restoring the home window.
     fn fail(&mut self, ctx: &egui::Context, message: String) {
         self.capture = CaptureState::Idle;
-        restore_home(ctx, self.home_pos);
+        restore_home(ctx, self.home_pos, !self.hidden_to_tray);
         self.status = Some(format!("Capture failed: {message}"));
         ctx.request_repaint();
+    }
+
+    /// Draw the on-screen countdown badge (Timer ▾). Esc (or closing it) cancels
+    /// the pending capture and restores the home window.
+    fn countdown_ui(&mut self, ui: &mut egui::Ui) {
+        // Esc only reaches us if the badge happens to be focused; it intentionally
+        // is NOT (so the user can arrange the screen during the countdown), so a
+        // click anywhere on the badge is the reliable cancel.
+        let key_cancel =
+            ui.input(|i| i.key_pressed(egui::Key::Escape) || i.viewport().close_requested());
+
+        let seconds = match &self.capture {
+            CaptureState::Counting { since, total, .. } => {
+                total.saturating_sub(since.elapsed()).as_secs_f32().ceil() as u64
+            }
+            _ => return,
+        }
+        .max(1);
+
+        let mut click_cancel = false;
+        egui::CentralPanel::default().show_inside(ui, |ui| {
+            click_cancel = ui
+                .interact(
+                    ui.max_rect(),
+                    ui.id().with("countdown"),
+                    egui::Sense::click(),
+                )
+                .clicked();
+            ui.vertical_centered(|ui| {
+                ui.add_space(20.0);
+                ui.label(egui::RichText::new(seconds.to_string()).size(64.0).strong());
+                ui.label(egui::RichText::new("click or Esc to cancel").small().weak());
+            });
+        });
+
+        if key_cancel || click_cancel {
+            let ctx = ui.ctx().clone();
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.finish(&ctx, None);
+            return;
+        }
+        // The digit changes once a second; repaint a few times a second (the badge
+        // is visible, so request_repaint_after is honoured) instead of at full rate.
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(200));
     }
 
     /// The Win11-style home window: a persistent toolbar plus one of the
@@ -466,7 +688,7 @@ impl FreallySnipperApp {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     for path in &recents {
-                        let tile = ui.allocate_ui(egui::vec2(TILE + 8.0, TILE + 8.0), |ui| {
+                        let tile = ui.allocate_ui(egui::vec2(146.0, TILE + 30.0), |ui| {
                             if draw_thumb(&mut self.gallery, ui, path) {
                                 to_open = Some(path.clone());
                             }
@@ -681,6 +903,51 @@ impl FreallySnipperApp {
                 ui.add_space(12.0);
                 ui.separator();
                 ui.add_space(6.0);
+                ui.heading("Capture");
+                ui.add_space(4.0);
+                let mut show_editor = self.settings.show_capture_editor;
+                if ui
+                    .checkbox(&mut show_editor, "Show the capture editor after capturing")
+                    .on_hover_text(
+                        "Open the image editor (Toolbar 2) after each capture instead of saving \
+                         straight away. The editor arrives in Phase 4; until then captures save \
+                         as they do now.",
+                    )
+                    .changed()
+                {
+                    self.settings.show_capture_editor = show_editor;
+                    *dirty = true;
+                }
+                ui.small("The in-app editor (Toolbar 2) arrives in Phase 4; until then captures save directly.");
+
+                ui.add_space(10.0);
+                let tray_available = self.tray.is_some();
+                let mut tray_on = self.settings.minimize_to_tray;
+                if ui
+                    .add_enabled(
+                        tray_available,
+                        egui::Checkbox::new(&mut tray_on, "Minimize to system tray"),
+                    )
+                    .on_hover_text(
+                        "Keep Freally Snipper in the system tray when the window is closed, so the \
+                         hotkey and Print Screen keep working. Double-click the tray icon (or its \
+                         menu) to reopen; Quit exits.",
+                    )
+                    .changed()
+                {
+                    self.settings.minimize_to_tray = tray_on;
+                    if let Some(tray) = &self.tray {
+                        tray.set_visible(tray_on);
+                    }
+                    *dirty = true;
+                }
+                if !tray_available {
+                    ui.small("System tray runs on Windows and macOS; Linux support arrives in Phase 7.");
+                }
+
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(6.0);
                 self.print_screen_section(ui);
 
                 ui.add_space(12.0);
@@ -830,6 +1097,8 @@ impl eframe::App for FreallySnipperApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         if matches!(self.capture, CaptureState::Active(_)) {
             self.overlay_ui(ui);
+        } else if matches!(self.capture, CaptureState::Counting { .. }) {
+            self.countdown_ui(ui);
         } else {
             self.home_ui(ui);
         }
@@ -845,41 +1114,72 @@ fn toggle_view(view: HomeView, target: HomeView) -> HomeView {
     }
 }
 
-/// Draw one recent-capture tile, returning `true` if it was clicked (to open).
-/// Texture id + size are copied out first so the gallery borrow doesn't extend
-/// into the `else` branches.
+/// Draw one recent-capture tile (thumbnail + its modified date/time), returning
+/// `true` if it was clicked (to open). The date label and texture id + size are
+/// read out first so the gallery borrow doesn't extend into the draw branches.
 fn draw_thumb(gallery: &mut Gallery, ui: &mut egui::Ui, path: &Path) -> bool {
+    let when = gallery.modified_label(path).to_owned();
+    let texture = gallery.thumbnail(path).map(|t| (t.id(), t.size()));
+    let failed = gallery.is_failed(path);
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string());
+    let hover = format!("{name}\n{when}\nOpen (the in-app editor arrives in Phase 4)");
 
-    let texture = gallery.thumbnail(path).map(|t| (t.id(), t.size()));
-    let failed = gallery.is_failed(path);
-
-    if let Some((id, [w, h])) = texture {
-        let size = fit_within([w as f32, h as f32], TILE);
-        let image = egui::Image::from_texture(egui::load::SizedTexture::new(id, size));
-        ui.add(egui::Button::image(image))
-            .on_hover_text(format!(
-                "{name}\nOpen (the in-app editor arrives in Phase 4)"
-            ))
-            .clicked()
-    } else if failed {
-        ui.add_sized([TILE, TILE], egui::Button::new("Open"))
-            .on_hover_text(format!("{name}\nPreview unavailable"))
-            .clicked()
-    } else {
-        ui.allocate_ui(egui::vec2(TILE, TILE), |ui| {
-            ui.centered_and_justified(|ui| {
-                ui.spinner();
+    let mut clicked = false;
+    ui.vertical_centered(|ui| {
+        if let Some((id, [w, h])) = texture {
+            // Uniform square tile showing the WHOLE image (letterboxed, never
+            // cropped), so every tile is the same size regardless of aspect ratio.
+            let (rect, response) =
+                ui.allocate_exact_size(egui::vec2(TILE, TILE), egui::Sense::click());
+            let response = response.on_hover_text(&hover);
+            let widget = if response.hovered() {
+                ui.visuals().widgets.hovered
+            } else {
+                ui.visuals().widgets.inactive
+            };
+            ui.painter()
+                .rect_filled(rect, egui::CornerRadius::same(4), widget.bg_fill);
+            let fit = fit_within([w as f32, h as f32], TILE - 8.0);
+            let image = egui::Image::from_texture(egui::load::SizedTexture::new(id, fit));
+            image.paint_at(ui, egui::Rect::from_center_size(rect.center(), fit));
+            clicked = response.clicked();
+        } else if failed {
+            clicked = ui
+                .add_sized([TILE, TILE], egui::Button::new("Open"))
+                .on_hover_text(&hover)
+                .clicked();
+        } else {
+            ui.allocate_ui(egui::vec2(TILE, TILE), |ui| {
+                ui.centered_and_justified(|ui| {
+                    ui.spinner();
+                });
             });
-        });
-        false
+        }
+        ui.add(egui::Label::new(egui::RichText::new(&when).small().weak()).truncate());
+    });
+    clicked
+}
+
+/// Downscale the (already-square) app icon to a small, crisp `size`×`size` RGBA
+/// for the system tray. Windows scales the tray slot to ~16–32px, so handing it
+/// the full-resolution icon yields a distorted/blurry result; a clean Lanczos
+/// downscale to a small square fixes it. Falls back to the original on error.
+fn tray_icon_rgba(icon: &egui::IconData, size: u32) -> (Vec<u8>, u32, u32) {
+    match image::RgbaImage::from_raw(icon.width, icon.height, icon.rgba.clone()) {
+        Some(img) => {
+            let small =
+                image::imageops::resize(&img, size, size, image::imageops::FilterType::Lanczos3);
+            (small.into_raw(), size, size)
+        }
+        None => (icon.rgba.clone(), icon.width, icon.height),
     }
 }
 
-/// Scale `[w, h]` to fit within a `max`×`max` box, never upscaling.
+/// Scale `[w, h]` to fit within a `max`×`max` box, never upscaling — used to show
+/// a whole thumbnail centered inside a uniform square tile.
 fn fit_within([w, h]: [f32; 2], max: f32) -> egui::Vec2 {
     if w <= 0.0 || h <= 0.0 {
         return egui::vec2(max, max);
@@ -895,6 +1195,31 @@ pub(crate) fn apply_theme(ctx: &egui::Context, theme: Theme) {
         Theme::Dark => egui::ThemePreference::Dark,
     };
     ctx.set_theme(preference);
+}
+
+/// Size of the on-screen countdown badge, in points.
+const BADGE_SIZE: egui::Vec2 = egui::vec2(150.0, 150.0);
+
+/// Shrink the single OS window into a small, borderless, always-on-top countdown
+/// badge centered on `center`. Focus is intentionally NOT taken, so the user can
+/// still arrange the target window while the countdown runs.
+fn morph_to_countdown_badge(ctx: &egui::Context, center: egui::Pos2) {
+    let pos = center - BADGE_SIZE * 0.5;
+    ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(false));
+    ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
+        egui::WindowLevel::AlwaysOnTop,
+    ));
+    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(BADGE_SIZE));
+    ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
+    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+}
+
+/// Center of the monitor the window is on, in points (for placing the countdown
+/// badge). Falls back to a reasonable default if the monitor size is unknown.
+fn screen_center(ctx: &egui::Context) -> egui::Pos2 {
+    ctx.input(|i| i.viewport().monitor_size)
+        .map(|m| egui::pos2(m.x / 2.0, m.y / 2.0))
+        .unwrap_or(egui::pos2(700.0, 450.0))
 }
 
 /// Reconfigure the single OS window to cover the whole virtual desktop as a
@@ -913,8 +1238,10 @@ fn morph_to_overlay(ctx: &egui::Context, bounds: VRect) {
     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
 }
 
-/// Restore the window to the decorated home window after a capture ends.
-fn restore_home(ctx: &egui::Context, home_pos: Option<egui::Pos2>) {
+/// Restore the window's decorated home-window shape after a capture ends. `show`
+/// is false when the app is minimized to the tray, so the window keeps its shape
+/// but stays hidden instead of popping back up.
+fn restore_home(ctx: &egui::Context, home_pos: Option<egui::Pos2>, show: bool) {
     ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
         egui::WindowLevel::Normal,
     ));
@@ -923,8 +1250,10 @@ fn restore_home(ctx: &egui::Context, home_pos: Option<egui::Pos2>) {
     if let Some(pos) = home_pos {
         ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
     }
-    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(show));
+    if show {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+    }
 }
 
 /// Grab the whole desktop as a frozen composite plus the front-to-back window

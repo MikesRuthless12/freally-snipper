@@ -28,6 +28,9 @@ pub struct Gallery {
     textures: HashMap<PathBuf, egui::TextureHandle>,
     requested: HashSet<PathBuf>,
     failed: HashSet<PathBuf>,
+    /// Cached "modified" timestamp label per path (computed once; files don't
+    /// change their capture time).
+    times: HashMap<PathBuf, String>,
 }
 
 impl Gallery {
@@ -48,7 +51,18 @@ impl Gallery {
             textures: HashMap::new(),
             requested: HashSet::new(),
             failed: HashSet::new(),
+            times: HashMap::new(),
         }
+    }
+
+    /// The capture's local modified date/time (e.g. `6/17/2026 | 1:48 AM`),
+    /// computed once per path and cached. Falls back to `—` if unavailable.
+    pub fn modified_label(&mut self, path: &Path) -> &str {
+        if !self.times.contains_key(path) {
+            let label = modified_label_for(path).unwrap_or_else(|| "—".to_owned());
+            self.times.insert(path.to_path_buf(), label);
+        }
+        &self.times[path]
     }
 
     /// Upload any thumbnails that finished decoding. Call once per frame before
@@ -111,5 +125,22 @@ fn load_thumbnail(path: &Path) -> Option<egui::ColorImage> {
     Some(egui::ColorImage::from_rgba_unmultiplied(
         [w as usize, h as usize],
         thumb.as_raw(),
+    ))
+}
+
+/// Format a file's modified time as a local `M/D/YYYY | h:MM AM/PM` string.
+fn modified_label_for(path: &Path) -> Option<String> {
+    use chrono::{DateTime, Datelike, Local, Timelike};
+    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
+    let dt: DateTime<Local> = modified.into();
+    let (pm, hour12) = dt.hour12();
+    Some(format!(
+        "{}/{}/{} | {}:{:02} {}",
+        dt.month(),
+        dt.day(),
+        dt.year(),
+        hour12,
+        dt.minute(),
+        if pm { "PM" } else { "AM" }
     ))
 }

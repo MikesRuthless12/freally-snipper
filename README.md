@@ -6,9 +6,10 @@ ScreenToGif, but **free, local-first, and privacy-respecting** (no accounts, no 
 telemetry).
 
 > **Status:** Phase 2 (Home window) — a Win11-style capture toolbar (New · Camera · Video ·
-> Snippet ▾ · Timer ▾ · Color), a recent-captures gallery, full settings (hotkey, save folder,
-> format, theme, 18-language picker), an About panel, and an opt-in Print Screen takeover. Builds
-> on the Phase 1 capture core and Phase 0 foundation.
+> Snippet ▾ · Timer ▾ · Color), an on-screen capture timer (select → countdown → live grab), a
+> recent-captures gallery with dates, a **system tray** (Windows/macOS), full settings (hotkey,
+> save folder, format, theme, 18-language picker, editor toggle), an About panel, and an opt-in
+> Print Screen takeover. Builds on the Phase 1 capture core and Phase 0 foundation.
 
 > **🔒 No bundled AI models — full transparency.** Capture and image/video editing work **100%
 > offline**. The **optional** speech-to-text, translation, and dubbing features use third-party AI
@@ -63,10 +64,12 @@ on the home window. The window hides and the screen freezes under a dimmed selec
 - **Full screen** — captures every monitor at once.
 - **Esc** cancels.
 
-Pick the mode from **Snippet ▾** and an optional countdown from **Timer ▾** (3 / 5 / 10 s).
-Each capture is **copied to the clipboard** and **saved** to your save folder (default
-`Pictures/Freally Snipper`), and appears as a **thumbnail** on the home window — click it to
-open in your OS viewer (the in-app editor arrives in Phase 4).
+Pick the mode from **Snippet ▾**. With **Timer ▾** (3 / 5 / 10 s) you select the region first, then a
+center-screen countdown runs and the **live** screen is grabbed — so you can arrange the screen during
+the delay (Timer Off captures immediately). Each capture is **copied to the clipboard** and **saved** to
+your save folder (default `Pictures/Freally Snipper`), and appears as a dated **thumbnail** on the home
+window — click it to open in your OS viewer (the in-app editor arrives in Phase 4). Turn on **minimize to
+system tray** to keep the hotkey working while the window is closed.
 
 ## Develop
 
@@ -92,7 +95,7 @@ cargo bundle --release        # run on each target OS
 | OS | Produces | Notes |
 |----|----------|-------|
 | Windows | `.msi` | needs the [WiX Toolset](https://wixtoolset.org); a `.ico` is produced at packaging time |
-| macOS | `.app` / `.dmg` | `.icns` generated from `assets/icon.png`; notarization comes in Phase 7 |
+| macOS | `.app` / `.dmg` | `.icns` generated from `assets/Freally_Snipper_Icon_Light.png`; notarization comes in Phase 7 |
 | Linux | `.deb` | AppImage / `.rpm` / Flatpak come in Phase 7 |
 
 ### Releases
@@ -130,5 +133,5 @@ Publish it via **Settings → Pages → Deploy from a branch → `main` / `docs`
 On first run, settings are written as JSON to your OS configuration directory (resolved via the
 [`directories`](https://crates.io/crates/directories) crate) and persist across runs. They hold
 the hotkey, save folder, image format, theme, default snippet mode, capture timer, markup colour,
-UI language, and the opt-in Print Screen takeover. The exact path is shown at the bottom of the
-in-app **Settings** view.
+UI language, a "show capture editor" toggle, minimize-to-tray, and the opt-in Print Screen takeover.
+The exact path is shown at the bottom of the in-app **Settings** view.

@@ -44,16 +44,32 @@ pub fn save_capture(
 
     let path = unique_path(folder, ext);
 
-    // JPEG has no alpha channel; drop it. PNG/BMP keep RGBA as-is.
+    // JPEG has no alpha channel. Don't just drop alpha (that would leak the
+    // masked-out pixels of a Freeform crop back in as a full rectangle) — instead
+    // composite over white, so transparent areas become white like the Win11
+    // Snipping Tool. PNG/BMP keep the RGBA (and its transparency) as-is.
     let result = if matches!(encoder, ::image::ImageFormat::Jpeg) {
-        let rgb = ::image::DynamicImage::ImageRgba8(image.clone()).to_rgb8();
-        rgb.save_with_format(&path, encoder)
+        flatten_over_white(image).save_with_format(&path, encoder)
     } else {
         image.save_with_format(&path, encoder)
     };
 
     result.map_err(std::io::Error::other)?;
     Ok(path)
+}
+
+/// Composite an RGBA image over a white background, returning opaque RGB.
+/// Transparent (e.g. freeform-masked) pixels become white instead of revealing
+/// the pixels left underneath the mask.
+fn flatten_over_white(image: &RgbaImage) -> ::image::RgbImage {
+    let mut rgb = ::image::RgbImage::new(image.width(), image.height());
+    for (dst, src) in rgb.pixels_mut().zip(image.pixels()) {
+        let a = src[3] as u32;
+        // out = src·(a/255) + 255·(1 - a/255)
+        let blend = |c: u8| ((c as u32 * a + 255 * (255 - a) + 127) / 255) as u8;
+        *dst = ::image::Rgb([blend(src[0]), blend(src[1]), blend(src[2])]);
+    }
+    rgb
 }
 
 fn unix_millis() -> u128 {
@@ -74,4 +90,22 @@ fn unique_path(folder: &Path, ext: &str) -> PathBuf {
         n += 1;
     }
     path
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ::image::Rgba;
+
+    #[test]
+    fn flatten_over_white_composites_alpha() {
+        let mut img = RgbaImage::new(3, 1);
+        img.put_pixel(0, 0, Rgba([10, 20, 30, 255])); // opaque → unchanged
+        img.put_pixel(1, 0, Rgba([10, 20, 30, 0])); // transparent → white
+        img.put_pixel(2, 0, Rgba([0, 0, 0, 128])); // half → ~mid gray
+        let rgb = flatten_over_white(&img);
+        assert_eq!(rgb.get_pixel(0, 0).0, [10, 20, 30]);
+        assert_eq!(rgb.get_pixel(1, 0).0, [255, 255, 255]);
+        assert!((126..=129).contains(&rgb.get_pixel(2, 0).0[0]));
+    }
 }

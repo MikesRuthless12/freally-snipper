@@ -174,6 +174,9 @@ pub struct Settings {
     pub default_snippet_mode: SnippetMode,
     /// Countdown before a capture starts (Timer ▾).
     pub timer_delay: TimerDelay,
+    /// Open the image editor (Toolbar 2) after a capture instead of saving
+    /// directly. The editor arrives in Phase 4; until then captures save as now.
+    pub show_capture_editor: bool,
     /// Active markup colour (RGBA), set from the toolbar Color picker and reused
     /// by the editor's tools in later phases.
     pub active_color: [u8; 4],
@@ -182,6 +185,9 @@ pub struct Settings {
     pub ui_language: String,
     /// Opt-in: register Print Screen to open Freally Snipper (P1.5).
     pub open_with_print_screen: bool,
+    /// Keep running in the system tray when the window is closed, so the global
+    /// hotkey (incl. Print Screen) still starts captures (Windows/macOS).
+    pub minimize_to_tray: bool,
     /// Windows-only memory of the prior Print-Screen registry value, so the
     /// override can be cleanly reverted. `None` means we have not changed it.
     pub print_screen_prior: Option<PrtScPrior>,
@@ -198,9 +204,11 @@ impl Default for Settings {
             theme: Theme::default(),
             default_snippet_mode: SnippetMode::default(),
             timer_delay: TimerDelay::default(),
+            show_capture_editor: false,
             active_color: [220, 38, 38, 255],
             ui_language: "en".to_owned(),
             open_with_print_screen: false,
+            minimize_to_tray: false,
             print_screen_prior: None,
             recent_captures: Vec::new(),
         }
@@ -277,9 +285,11 @@ mod tests {
             theme: Theme::Light,
             default_snippet_mode: SnippetMode::Freeform,
             timer_delay: TimerDelay::Seconds5,
+            show_capture_editor: true,
             active_color: [1, 2, 3, 4],
             ui_language: "ja".to_owned(),
             open_with_print_screen: true,
+            minimize_to_tray: true,
             print_screen_prior: Some(PrtScPrior::Value(1)),
             recent_captures: vec![PathBuf::from("/tmp/snips/a.png")],
         };

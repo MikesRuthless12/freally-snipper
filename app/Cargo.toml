@@ -22,17 +22,24 @@ global-hotkey = "0.8.0"
 arboard = "3.6.1"
 rfd = "0.17.2"
 opener = "0.7.2"
+chrono = { version = "0.4.42", default-features = false, features = ["clock", "std"] }
 
 # Windows-only: free the Print Screen key from the built-in Snipping Tool (P1.5),
 # via the safe `winreg` wrapper so the crate stays `#![forbid(unsafe_code)]`.
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52.0"
 
+# Windows + macOS: system-tray icon so the app can keep running (and keep serving
+# the global hotkey / Print Screen) while its window is closed. Linux tray needs a
+# GTK loop that conflicts with our winit backend — deferred to Phase 7.
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+tray-icon = "0.19.3"
+
 # --- Packaging (cargo-bundle): `cargo install cargo-bundle` then `cargo bundle --release` ---
 [package.metadata.bundle]
 name = "Freally Snipper"
 identifier = "com.havoc-software.freally-snipper"
-icon = ["assets/Freally_Snipper_Icon_Dark.png"]
+icon = ["assets/Freally_Snipper_Icon_Light.png"]
 category = "Utility"
 short_description = "Free screen capture + image & light video editor."
 long_description = """

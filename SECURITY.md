@@ -41,7 +41,9 @@ remediate before any public disclosure.
   — only after an explicit consent dialog — and restores the prior value when disabled; it never
   touches machine-wide (`HKLM`) settings. That registry access uses the safe `winreg` wrapper, so
   the app stays `#![forbid(unsafe_code)]`. The UI-language setting is stored locally and sends
-  nothing anywhere.
+  nothing anywhere. The opt-in **system tray** (Windows/macOS) only keeps the app running locally so
+  the capture hotkey works while the window is closed — no network activity; timestamps shown in the
+  gallery read only the local clock.
 - **Third-party components** (see [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) carry their own
   advisories; we track and update them, and intend to run `cargo audit` / `cargo deny` in CI as the
   project matures.
