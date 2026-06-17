@@ -22,6 +22,7 @@
 //! The editor is drawn into the app's single OS window (morphed to a decorated
 //! editor window), matching the one-window model the capture overlay already uses.
 
+mod filters;
 mod objects;
 mod raster;
 mod text;
@@ -121,6 +122,55 @@ enum ObjDrag {
     Handle(usize),
     /// Drawing a new shape (the new object is selected).
     Create,
+}
+
+/// A live, undoable image filter (P4.5).
+#[derive(Clone, Copy)]
+enum Filter {
+    Grayscale,
+    Sepia,
+    Invert,
+    Blur,
+    Sharpen,
+    Brighten,
+    Darken,
+    MoreContrast,
+    LessContrast,
+    Posterize,
+    Cartoonize,
+}
+
+impl Filter {
+    /// The Filters ▾ menu, in order.
+    const MENU: [(Filter, &'static str); 11] = [
+        (Filter::Grayscale, "Grayscale"),
+        (Filter::Sepia, "Sepia"),
+        (Filter::Invert, "Invert"),
+        (Filter::Blur, "Blur"),
+        (Filter::Sharpen, "Sharpen"),
+        (Filter::Brighten, "Brighten"),
+        (Filter::Darken, "Darken"),
+        (Filter::MoreContrast, "More contrast"),
+        (Filter::LessContrast, "Less contrast"),
+        (Filter::Posterize, "Posterize"),
+        (Filter::Cartoonize, "Cartoonize"),
+    ];
+
+    fn apply(self, img: &RgbaImage) -> RgbaImage {
+        match self {
+            Filter::Grayscale => filters::grayscale(img),
+            Filter::Sepia => filters::sepia(img),
+            Filter::Invert => filters::invert(img),
+            Filter::Blur => filters::box_blur(img, 2),
+            Filter::Sharpen => filters::sharpen(img),
+            Filter::Brighten => filters::brightness(img, 24),
+            Filter::Darken => filters::brightness(img, -24),
+            Filter::MoreContrast => filters::contrast(img, 1.2),
+            Filter::LessContrast => filters::contrast(img, 0.82),
+            Filter::Posterize => filters::posterize(img, 5),
+            Filter::Cartoonize => filters::cartoonize(img),
+        }
+    }
 }
 
 /// A rendered text stamp + its GPU texture, cached by content (P4.4).
@@ -325,6 +375,7 @@ impl EditorSession {
     /// but disabled, each labelled with the prompt that enables it.
     fn tool_strip(&mut self, ui: &mut egui::Ui) {
         ui.add_space(2.0);
+        let mut chosen_filter: Option<Filter> = None;
         ui.horizontal_wrapped(|ui| {
             self.tool_button(
                 ui,
@@ -380,11 +431,17 @@ impl EditorSession {
             );
             disabled_tool(ui, "Image", "Place an image — arrives in Phase 4 (P4.8)");
             ui.separator();
-            disabled_tool(
-                ui,
-                "Filters ▾",
-                "Grayscale / blur / cartoonize / … — Phase 4 (P4.5)",
-            );
+            // Filters ▾ — live, undoable image filters (P4.5).
+            ui.menu_button("Filters ▾", |ui| {
+                for (filter, label) in Filter::MENU {
+                    if ui.button(label).clicked() {
+                        chosen_filter = Some(filter);
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .on_hover_text("Apply a live, undoable filter to the image");
             disabled_tool(
                 ui,
                 "Transform",
@@ -401,6 +458,9 @@ impl EditorSession {
                 "OCR the image to the clipboard — arrives in Phase 4 (P4.6)",
             );
         });
+        if let Some(filter) = chosen_filter {
+            self.apply_filter(filter);
+        }
         ui.add_space(2.0);
         ui.separator();
         self.tool_options(ui);
@@ -1131,6 +1191,14 @@ impl EditorSession {
                 Edit::Objects(current)
             }
         }
+    }
+
+    /// Apply a live filter to the raster as one undoable step (P4.5).
+    fn apply_filter(&mut self, filter: Filter) {
+        self.push_raster_undo();
+        self.image = filter.apply(&self.image);
+        self.reupload();
+        self.notice = None;
     }
 
     /// Render/cache each text object's stamp (by content) and keep its bounds in
