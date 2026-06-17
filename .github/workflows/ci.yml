@@ -42,7 +42,8 @@ jobs:
             libclang-dev \
             libpipewire-0.3-dev \
             libwayland-dev \
-            libegl-dev
+            libegl-dev \
+            libgbm-dev
 
       - name: Format check
         run: cargo fmt --all -- --check
