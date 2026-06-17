@@ -62,7 +62,78 @@ pub fn bake_stroke(
         } => Some(text_mask(image, bbox, &cov)),
         _ => None,
     };
-    composite(image, pristine, bbox, &cov, text.as_deref(), paint);
+    composite(image, Some(pristine), bbox, &cov, text.as_deref(), paint);
+}
+
+/// Bake an anti-aliased solid-colour path (a polyline with round caps) into
+/// `image` — the shape-outline / line / arrow primitive for P4.3 objects.
+pub fn bake_solid_path(image: &mut RgbaImage, points: &[(f32, f32)], radius: f32, color: [u8; 3]) {
+    if points.is_empty() || radius <= 0.0 {
+        return;
+    }
+    let Some(bbox) = stroke_bbox(points, radius, image.width(), image.height()) else {
+        return;
+    };
+    let cov = rasterize_coverage(points, radius, bbox);
+    composite(image, None, bbox, &cov, None, &Paint::Solid(color));
+}
+
+/// Alpha-composite (`src`-over) a solid `color` into the axis-aligned rectangle
+/// spanning corners `a`–`b` (image space) — a filled rect / shape interior.
+pub fn fill_rect(image: &mut RgbaImage, a: (f32, f32), b: (f32, f32), color: [u8; 4]) {
+    let (w, h) = (image.width(), image.height());
+    let x0 = a.0.min(b.0).floor().clamp(0.0, w as f32) as u32;
+    let y0 = a.1.min(b.1).floor().clamp(0.0, h as f32) as u32;
+    let x1 = a.0.max(b.0).ceil().clamp(0.0, w as f32) as u32;
+    let y1 = a.1.max(b.1).ceil().clamp(0.0, h as f32) as u32;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let out = blend_over(image.get_pixel(x, y).0, color);
+            image.put_pixel(x, y, Rgba(out));
+        }
+    }
+}
+
+/// Alpha-composite a solid `color` into the filled ellipse with `center` and
+/// `radius` (rx, ry) in image space.
+pub fn fill_ellipse(image: &mut RgbaImage, center: (f32, f32), radius: (f32, f32), color: [u8; 4]) {
+    let (rx, ry) = radius;
+    if rx <= 0.0 || ry <= 0.0 {
+        return;
+    }
+    let (w, h) = (image.width(), image.height());
+    let x0 = (center.0 - rx).floor().clamp(0.0, w as f32) as u32;
+    let y0 = (center.1 - ry).floor().clamp(0.0, h as f32) as u32;
+    let x1 = (center.0 + rx).ceil().clamp(0.0, w as f32) as u32;
+    let y1 = (center.1 + ry).ceil().clamp(0.0, h as f32) as u32;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let nx = (x as f32 + 0.5 - center.0) / rx;
+            let ny = (y as f32 + 0.5 - center.1) / ry;
+            if nx * nx + ny * ny <= 1.0 {
+                let out = blend_over(image.get_pixel(x, y).0, color);
+                image.put_pixel(x, y, Rgba(out));
+            }
+        }
+    }
+}
+
+/// Straight alpha `src`-over composite of `color` onto `dst` (both RGBA bytes).
+fn blend_over(dst: [u8; 4], color: [u8; 4]) -> [u8; 4] {
+    let a = color[3] as f32 / 255.0;
+    if a <= 0.0 {
+        return dst;
+    }
+    if a >= 1.0 {
+        return color;
+    }
+    let blend = |d: u8, s: u8| lerp(d, s, a);
+    [
+        blend(dst[0], color[0]),
+        blend(dst[1], color[1]),
+        blend(dst[2], color[2]),
+        ((color[3] as f32) + (dst[3] as f32) * (1.0 - a)).round() as u8,
+    ]
 }
 
 /// The pixel rectangle the stroke can touch, clamped to the image. `None` if it
@@ -192,15 +263,17 @@ fn luma(px: &Rgba<u8>) -> u8 {
 }
 
 /// Composite the coverage buffer into `image` per the tool's [`Paint`] mode.
+/// `pristine` (for [`Paint::Restore`]) is optional — shape baking passes `None`.
 fn composite(
     image: &mut RgbaImage,
-    pristine: &RgbaImage,
+    pristine: Option<&RgbaImage>,
     bbox: Bbox,
     cov: &[f32],
     text: Option<&[bool]>,
     paint: &Paint,
 ) {
-    let restore_ok = pristine.width() == image.width() && pristine.height() == image.height();
+    // Pristine is only usable for Restore when it matches the image dimensions.
+    let restore = pristine.filter(|p| p.width() == image.width() && p.height() == image.height());
     for y in 0..bbox.h {
         for x in 0..bbox.w {
             let idx = (y * bbox.w + x) as usize;
@@ -239,10 +312,10 @@ fn composite(
                     lerp(src[3], 255, c),
                 ],
                 Paint::Restore => {
-                    if !restore_ok {
+                    let Some(p) = restore else {
                         continue;
-                    }
-                    let p = pristine.get_pixel(px, py).0;
+                    };
+                    let p = p.get_pixel(px, py).0;
                     [
                         lerp(src[0], p[0], c),
                         lerp(src[1], p[1], c),
@@ -375,5 +448,38 @@ mod tests {
             &Paint::Solid([9, 9, 9]),
         );
         assert!(img.pixels().all(|p| p.0 == [1, 2, 3, 255]));
+    }
+
+    #[test]
+    fn fill_rect_paints_the_interior_only() {
+        let mut img = solid(10, 10, [255, 255, 255, 255]);
+        fill_rect(&mut img, (2.0, 2.0), (8.0, 8.0), [255, 0, 0, 255]);
+        assert_eq!(img.get_pixel(5, 5).0, [255, 0, 0, 255]); // inside → red
+        assert_eq!(img.get_pixel(0, 0).0, [255, 255, 255, 255]); // outside → white
+    }
+
+    #[test]
+    fn fill_rect_alpha_blends_when_translucent() {
+        let mut img = solid(4, 4, [0, 0, 0, 255]);
+        fill_rect(&mut img, (0.0, 0.0), (4.0, 4.0), [255, 255, 255, 128]);
+        // Half-opacity white over black ≈ mid grey.
+        let g = img.get_pixel(1, 1).0[0];
+        assert!((120..=136).contains(&g), "got {g}");
+    }
+
+    #[test]
+    fn fill_ellipse_fills_center_not_corner() {
+        let mut img = solid(20, 20, [255, 255, 255, 255]);
+        fill_ellipse(&mut img, (10.0, 10.0), (8.0, 8.0), [0, 128, 0, 255]);
+        assert_eq!(img.get_pixel(10, 10).0, [0, 128, 0, 255]); // centre filled
+        assert_eq!(img.get_pixel(0, 0).0, [255, 255, 255, 255]); // corner spared
+    }
+
+    #[test]
+    fn solid_path_draws_a_line() {
+        let mut img = solid(20, 5, [255, 255, 255, 255]);
+        bake_solid_path(&mut img, &[(2.0, 2.0), (18.0, 2.0)], 1.0, [0, 0, 0]);
+        assert_eq!(img.get_pixel(10, 2).0, [0, 0, 0, 255]); // on the line
+        assert_eq!(img.get_pixel(10, 4).0, [255, 255, 255, 255]); // off the line
     }
 }

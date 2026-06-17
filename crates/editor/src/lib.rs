@@ -8,21 +8,27 @@
 //!   and a two-mode Eraser (erase-to-white / restore-original). Each has its own
 //!   adjustable **size**. Strokes preview live and bake into the raster on release;
 //!   every bake is a single undo step.
+//! - **P4.3** — **movable overlay objects** (shapes: rectangle / oval / line /
+//!   arrow): select, drag to move, drag a handle to resize, Delete to remove;
+//!   drawn over the raster and flattened only on Save. The same object model
+//!   carries Text / Watermark (P4.4), Emoji (P4.7) and Image (P4.8).
 //!
-//! Still to come on the same [`EditorSession`]: movable text / shape / watermark /
-//! emoji / image objects (P4.3, P4.7, P4.8); live filters (P4.5); transforms +
-//! eyedropper + OCR (P4.6); translate-as-you-type text (P4.9). Until each lands,
-//! its toolbar button is present but disabled and labelled with the prompt that
-//! enables it — the capture bar's convention for not-yet-built features.
+//! Still to come on the same [`EditorSession`]: text / watermark objects (P4.4),
+//! emoji (P4.7) and image (P4.8); live filters (P4.5); transforms + eyedropper +
+//! OCR (P4.6); translate-as-you-type text (P4.9). Until each lands, its toolbar
+//! button is present but disabled and labelled with the prompt that enables it —
+//! the capture bar's convention for not-yet-built features.
 //!
 //! The editor is drawn into the app's single OS window (morphed to a decorated
 //! editor window), matching the one-window model the capture overlay already uses.
 
+mod objects;
 mod raster;
 
 use egui::{Color32, PointerButton, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
 use freally_capture::image::RgbaImage;
 
+use objects::{Object, ShapeKind};
 use raster::Paint;
 
 /// Crate identifier, surfaced in version banners and logs.
@@ -40,8 +46,18 @@ const MIN_WIDTH: f32 = 1.0;
 const MAX_WIDTH: f32 = 200.0;
 /// Translucency of a highlighter stroke.
 const HL_ALPHA: f32 = 0.4;
-/// Undo depth. Each step is a full-image snapshot, so this also bounds memory.
+/// Undo depth. Each step is a full-image (or object-list) snapshot, bounding memory.
 const MAX_UNDO: usize = 24;
+
+/// Click tolerance for selecting an object, in screen points (scaled by zoom to
+/// image pixels), so selecting stays forgiving at any zoom.
+const HIT_TOL_PX: f32 = 6.0;
+/// Grab tolerance for a resize handle, in screen points.
+const HANDLE_TOL_PX: f32 = 9.0;
+/// On-screen size of a selection handle square, in points.
+const HANDLE_PX: f32 = 9.0;
+/// Default object stroke width, in image pixels.
+const DEFAULT_SHAPE_WIDTH: f32 = 4.0;
 
 /// What the editor wants the host app to do after a UI frame.
 pub enum EditorOutcome {
@@ -58,19 +74,45 @@ pub enum EditorOutcome {
 /// The active markup tool.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tool {
-    /// Move/zoom the view (no drawing) — the default.
-    Pan,
+    /// Select / move / resize objects (and pan empty space) — the default.
+    Select,
     Pen,
     Brush,
     Highlighter,
     Eraser,
+    /// Draw a new overlay shape of this kind (P4.3).
+    Shape(ShapeKind),
 }
 
 impl Tool {
-    /// Whether this tool paints onto the raster (vs. just panning the view).
-    fn is_drawing(self) -> bool {
-        !matches!(self, Tool::Pan)
+    /// Whether this tool paints freehand onto the raster (pen/brush/highlighter/eraser).
+    fn is_raster(self) -> bool {
+        matches!(
+            self,
+            Tool::Pen | Tool::Brush | Tool::Highlighter | Tool::Eraser
+        )
     }
+}
+
+/// One reversible edit. Raster strokes/filters snapshot the image; object edits
+/// snapshot the (small) object list — so moving an object never clones the image.
+enum Edit {
+    Raster(RgbaImage),
+    Objects(Vec<Object>),
+}
+
+/// What a primary-button drag on the canvas is doing (Select / Shape tools).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ObjDrag {
+    None,
+    /// Panning the view (Select tool, drag began on empty space).
+    Pan,
+    /// Moving the selected object.
+    Move,
+    /// Resizing the selected object via handle `usize`.
+    Handle(usize),
+    /// Drawing a new shape (the new object is selected).
+    Create,
 }
 
 /// Highlighter behaviour.
@@ -112,11 +154,22 @@ pub struct EditorSession {
     eraser_width: f32,
     hl_mode: HlMode,
     erase_mode: EraseMode,
+    /// Default width + fill for new shape objects.
+    shape_width: f32,
+    shape_fill: bool,
     /// In-progress stroke points, in image-pixel coordinates (empty = idle).
     stroke: Vec<Pos2>,
-    /// Undo / redo history of full-image snapshots.
-    undo: Vec<RgbaImage>,
-    redo: Vec<RgbaImage>,
+    /// Movable overlay objects (P4.3), drawn over the raster, baked on Save.
+    objects: Vec<Object>,
+    /// Index of the selected object, if any.
+    selected: Option<usize>,
+    /// Current primary-drag gesture on the canvas.
+    obj_drag: ObjDrag,
+    /// Whether the current object gesture has already pushed its undo snapshot.
+    obj_undo_pushed: bool,
+    /// Undo / redo history (raster image or object-list snapshots).
+    undo: Vec<Edit>,
+    redo: Vec<Edit>,
     /// A short note shown in the status bar (e.g. "Copied to clipboard").
     notice: Option<String>,
 }
@@ -147,7 +200,7 @@ impl EditorSession {
                 offset: Vec2::ZERO,
                 initialized: false,
             },
-            tool: Tool::Pan,
+            tool: Tool::Select,
             color,
             pen_width: 3.0,
             brush_width: 12.0,
@@ -155,21 +208,36 @@ impl EditorSession {
             eraser_width: 16.0,
             hl_mode: HlMode::Free,
             erase_mode: EraseMode::White,
+            shape_width: DEFAULT_SHAPE_WIDTH,
+            shape_fill: false,
             stroke: Vec::new(),
+            objects: Vec::new(),
+            selected: None,
+            obj_drag: ObjDrag::None,
+            obj_undo_pushed: false,
             undo: Vec::new(),
             redo: Vec::new(),
             notice: None,
         }
     }
 
-    /// Consume the session and return the working image (on Save).
+    /// Consume the session and return the flattened image (on Save).
     pub fn into_image(self) -> RgbaImage {
-        self.image
+        self.baked()
     }
 
-    /// A copy of the current working image (for Copy-to-clipboard while editing).
+    /// A flattened copy of the current image (for Copy-to-clipboard while editing).
     pub fn flatten(&self) -> RgbaImage {
-        self.image.clone()
+        self.baked()
+    }
+
+    /// The working raster with every overlay object baked in (Save flattening).
+    fn baked(&self) -> RgbaImage {
+        let mut img = self.image.clone();
+        for obj in &self.objects {
+            obj.bake_into(&mut img);
+        }
+        img
     }
 
     /// Image size in pixels, as a [`Vec2`].
@@ -201,9 +269,16 @@ impl EditorSession {
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             if !self.stroke.is_empty() {
                 self.stroke.clear();
+            } else if self.selected.is_some() {
+                self.selected = None; // deselect first, before any discard
             } else if self.undo.is_empty() {
                 return EditorOutcome::Discard;
             }
+        }
+
+        // Delete (or Backspace) removes the selected object.
+        if ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)) {
+            self.delete_selected();
         }
 
         let mut outcome = EditorOutcome::Active;
@@ -229,9 +304,9 @@ impl EditorSession {
         ui.horizontal_wrapped(|ui| {
             self.tool_button(
                 ui,
-                Tool::Pan,
-                "Pan",
-                "Move the view — drag to pan, scroll to zoom",
+                Tool::Select,
+                "Select",
+                "Select, move and resize objects — drag empty space to pan, scroll to zoom",
             );
             ui.separator();
             self.tool_button(ui, Tool::Pen, "Pen", "Freehand pen");
@@ -249,16 +324,29 @@ impl EditorSession {
                 "Eraser — erase to white, or remove markup only",
             );
             ui.separator();
-            disabled_tool(ui, "Text", "Text object — arrives in Phase 4 (P4.3)");
-            disabled_tool(
-                ui,
-                "Shapes",
-                "Rectangle / oval / line / arrow — Phase 4 (P4.3)",
-            );
+            // Shapes ▾ — pick a kind, then drag on the image to draw it (P4.3).
+            let shape_label = match self.tool {
+                Tool::Shape(kind) => format!("Shape: {}", kind.label()),
+                _ => "Shapes ▾".to_owned(),
+            };
+            ui.menu_button(shape_label, |ui| {
+                for kind in ShapeKind::ALL {
+                    if ui
+                        .selectable_label(self.tool == Tool::Shape(kind), kind.label())
+                        .clicked()
+                    {
+                        self.tool = Tool::Shape(kind);
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .on_hover_text("Draw a rectangle, oval, line or arrow (drag on the image)");
+            disabled_tool(ui, "Text", "Text object — arrives in Phase 4 (P4.4)");
             disabled_tool(
                 ui,
                 "Watermark",
-                "Watermark object — arrives in Phase 4 (P4.3)",
+                "Watermark object — arrives in Phase 4 (P4.4)",
             );
             disabled_tool(
                 ui,
@@ -305,20 +393,47 @@ impl EditorSession {
         }
     }
 
-    /// Options for the active drawing tool: size (per-tool), colour, and the
-    /// highlighter / eraser mode toggles.
+    /// Options for the active tool: the Select hint, a shape's size/colour/fill,
+    /// or a raster tool's per-tool size + colour + mode toggles.
     fn tool_options(&mut self, ui: &mut egui::Ui) {
-        if !self.tool.is_drawing() {
-            ui.add_space(2.0);
-            ui.label(
-                egui::RichText::new("Pick a tool above to draw · drag to pan · scroll to zoom")
-                    .weak(),
-            );
-            return;
-        }
         ui.add_space(2.0);
+        match self.tool {
+            Tool::Select => {
+                ui.label(
+                    egui::RichText::new(
+                        "Click an object to select · drag to move · drag a handle to resize · \
+                         Delete to remove · drag empty space to pan",
+                    )
+                    .weak(),
+                );
+            }
+            Tool::Shape(kind) => {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Size");
+                    ui.add(
+                        egui::Slider::new(&mut self.shape_width, MIN_WIDTH..=MAX_WIDTH)
+                            .suffix(" px"),
+                    )
+                    .on_hover_text("Outline width in image pixels");
+                    ui.separator();
+                    ui.label("Color");
+                    ui.color_edit_button_srgba_unmultiplied(&mut self.color)
+                        .on_hover_text("Shape colour");
+                    if kind.fillable() {
+                        ui.separator();
+                        ui.checkbox(&mut self.shape_fill, "Fill")
+                            .on_hover_text("Fill the interior");
+                    }
+                });
+            }
+            _ => self.raster_options(ui),
+        }
+    }
+
+    /// Size + colour + mode toggles for the active raster tool (P4.2).
+    fn raster_options(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
-            // Size — per-tool, so each tool keeps its own thickness (P4.2).
+            // Size — per-tool, so each tool keeps its own thickness.
             ui.label("Size");
             let mut width = self.width();
             if ui
@@ -522,31 +637,38 @@ impl EditorSession {
             StrokeKind::Outside,
         );
 
+        // Overlay objects (drawn over the raster, baked only on Save) + selection.
+        let to_screen = |p: Pos2| self.image_to_screen(canvas, p);
+        for obj in &self.objects {
+            obj.draw(&painter, &to_screen, self.view.zoom);
+        }
+        if let Some(obj) = self.selected.and_then(|i| self.objects.get(i)) {
+            objects::draw_selection(&painter, obj, &to_screen, HANDLE_PX);
+        }
+
         self.draw_stroke_preview(&painter, canvas);
         self.draw_cursor_ring(&painter, canvas, &response);
     }
 
-    /// Handle panning and drawing for one frame. Pan uses the primary button when
-    /// the Pan tool is active, otherwise the middle button (so a drawing tool can
-    /// still pan). A drawing tool draws with the primary button.
+    /// Route the canvas pointer for one frame by tool. Middle-drag always pans.
     fn handle_pointer(&mut self, response: &egui::Response, canvas: Rect) {
-        let pan_btn = if self.tool.is_drawing() {
-            PointerButton::Middle
-        } else {
-            PointerButton::Primary
-        };
-        if response.dragged_by(pan_btn) {
+        if response.dragged_by(PointerButton::Middle) {
             self.view.offset += response.drag_delta();
         }
-        if !self.tool.is_drawing() {
-            return;
-        }
-
         let pointer = response
             .interact_pointer_pos()
             .or_else(|| response.hover_pos())
             .map(|p| self.screen_to_image(canvas, p));
+        match self.tool {
+            Tool::Select => self.handle_select(response, pointer),
+            Tool::Shape(kind) => self.handle_shape(response, kind, pointer),
+            _ => self.handle_raster(response, pointer),
+        }
+    }
 
+    /// Raster freehand drawing (P4.2): a primary drag paints a stroke; a click
+    /// without a drag stamps a single dot.
+    fn handle_raster(&mut self, response: &egui::Response, pointer: Option<Pos2>) {
         if response.drag_started_by(PointerButton::Primary) {
             self.stroke.clear();
             if let Some(p) = pointer {
@@ -554,8 +676,7 @@ impl EditorSession {
             }
         } else if response.dragged_by(PointerButton::Primary) {
             if let Some(p) = pointer {
-                // Thin the path: keep points ≥ 1 image px apart so a bake over a
-                // long stroke stays cheap (matches the freeform lasso's approach).
+                // Thin the path: keep points ≥ 1 image px apart so the bake stays cheap.
                 if self.stroke.last().is_none_or(|&l| (l - p).length() >= 1.0) {
                     self.stroke.push(p);
                 }
@@ -564,9 +685,132 @@ impl EditorSession {
             let points = std::mem::take(&mut self.stroke);
             self.commit_stroke(&points);
         } else if response.clicked_by(PointerButton::Primary) && self.stroke.is_empty() {
-            // A click without a drag stamps a single dot.
             if let Some(p) = pointer {
                 self.commit_stroke(&[p]);
+            }
+        }
+    }
+
+    /// Select tool: click selects/deselects; a primary drag moves the object, drags
+    /// a handle to resize, or pans when it began on empty space.
+    fn handle_select(&mut self, response: &egui::Response, pointer: Option<Pos2>) {
+        if response.clicked_by(PointerButton::Primary) {
+            self.selected = pointer.and_then(|p| self.object_at(p));
+            return;
+        }
+        if response.drag_started_by(PointerButton::Primary) {
+            self.obj_undo_pushed = false;
+            self.obj_drag = match pointer {
+                Some(p) => {
+                    if let Some(h) = self.selected.and_then(|i| self.handle_at(i, p)) {
+                        ObjDrag::Handle(h)
+                    } else if let Some(i) = self.object_at(p) {
+                        self.selected = Some(i);
+                        ObjDrag::Move
+                    } else {
+                        self.selected = None;
+                        ObjDrag::Pan
+                    }
+                }
+                None => ObjDrag::Pan,
+            };
+        }
+        if response.dragged_by(PointerButton::Primary) {
+            let delta = response.drag_delta();
+            if delta != Vec2::ZERO {
+                match self.obj_drag {
+                    ObjDrag::Pan => self.view.offset += delta,
+                    ObjDrag::Move => {
+                        self.ensure_obj_undo();
+                        if let Some(i) = self.selected {
+                            self.objects[i].translate(delta / self.view.zoom);
+                        }
+                    }
+                    ObjDrag::Handle(h) => {
+                        self.ensure_obj_undo();
+                        if let (Some(i), Some(p)) = (self.selected, pointer) {
+                            self.objects[i].drag_handle(h, p);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if response.drag_stopped_by(PointerButton::Primary) {
+            self.obj_drag = ObjDrag::None;
+        }
+    }
+
+    /// Shape tool: a primary drag creates a new object; release finalizes it (and
+    /// drops a too-small one), then returns to Select so it can be adjusted.
+    fn handle_shape(&mut self, response: &egui::Response, kind: ShapeKind, pointer: Option<Pos2>) {
+        if response.drag_started_by(PointerButton::Primary) {
+            if let Some(p) = pointer {
+                self.push_objects_undo();
+                self.objects.push(Object {
+                    kind,
+                    a: p,
+                    b: p,
+                    color: self.color,
+                    width: self.shape_width,
+                    fill: kind.fillable() && self.shape_fill,
+                });
+                self.selected = Some(self.objects.len() - 1);
+                self.obj_drag = ObjDrag::Create;
+            }
+        } else if response.dragged_by(PointerButton::Primary) && self.obj_drag == ObjDrag::Create {
+            if let (Some(i), Some(p)) = (self.selected, pointer) {
+                self.objects[i].b = p;
+            }
+        } else if response.drag_stopped_by(PointerButton::Primary)
+            && self.obj_drag == ObjDrag::Create
+        {
+            self.obj_drag = ObjDrag::None;
+            // Drop a click-sized shape and the snapshot it pushed.
+            if let Some(i) = self.selected {
+                if (self.objects[i].a - self.objects[i].b).length() < 3.0 {
+                    self.objects.remove(i);
+                    self.selected = None;
+                    self.undo.pop();
+                }
+            }
+            self.tool = Tool::Select;
+        }
+    }
+
+    /// Push an objects-undo snapshot once per gesture, on the first real change.
+    fn ensure_obj_undo(&mut self) {
+        if !self.obj_undo_pushed {
+            self.push_objects_undo();
+            self.obj_undo_pushed = true;
+        }
+    }
+
+    /// Index of the top-most object hit at image point `p`.
+    fn object_at(&self, p: Pos2) -> Option<usize> {
+        let tol = HIT_TOL_PX / self.view.zoom;
+        self.objects
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, o)| o.hit(p, tol))
+            .map(|(i, _)| i)
+    }
+
+    /// The handle index of object `i` near image point `p`, if any.
+    fn handle_at(&self, i: usize, p: Pos2) -> Option<usize> {
+        let tol = HANDLE_TOL_PX / self.view.zoom;
+        let obj = self.objects.get(i)?;
+        obj.handles().into_iter().position(|h| h.distance(p) <= tol)
+    }
+
+    /// Remove the selected object (undoable).
+    fn delete_selected(&mut self) {
+        if let Some(i) = self.selected {
+            if i < self.objects.len() {
+                self.push_objects_undo();
+                self.objects.remove(i);
+                self.selected = None;
             }
         }
     }
@@ -580,7 +824,7 @@ impl EditorSession {
         if points.is_empty() {
             return;
         }
-        self.push_undo();
+        self.push_raster_undo();
         let radius = self.width() / 2.0;
         let pts: Vec<(f32, f32)> = points.iter().map(|p| (p.x, p.y)).collect();
         raster::bake_stroke(&mut self.image, &self.pristine, &pts, radius, &paint);
@@ -602,18 +846,18 @@ impl EditorSession {
                 EraseMode::White => Paint::White,
                 EraseMode::MarkupOnly => Paint::Restore,
             },
-            Tool::Pan => return None,
+            Tool::Select | Tool::Shape(_) => return None,
         })
     }
 
-    /// The active tool's stroke width (image pixels); 0 for the Pan tool.
+    /// The active tool's stroke width (image pixels); 0 for non-raster tools.
     fn width(&self) -> f32 {
         match self.tool {
             Tool::Pen => self.pen_width,
             Tool::Brush => self.brush_width,
             Tool::Highlighter => self.hl_width,
             Tool::Eraser => self.eraser_width,
-            Tool::Pan => 0.0,
+            Tool::Select | Tool::Shape(_) => 0.0,
         }
     }
 
@@ -625,7 +869,7 @@ impl EditorSession {
             Tool::Brush => self.brush_width = width,
             Tool::Highlighter => self.hl_width = width,
             Tool::Eraser => self.eraser_width = width,
-            Tool::Pan => {}
+            Tool::Select | Tool::Shape(_) => {}
         }
     }
 
@@ -656,9 +900,9 @@ impl EditorSession {
         }
     }
 
-    /// Draw a ring at the cursor showing the current brush size (drawing tools).
+    /// Draw a ring at the cursor showing the current brush size (raster tools).
     fn draw_cursor_ring(&self, painter: &egui::Painter, canvas: Rect, response: &egui::Response) {
-        if !self.tool.is_drawing() {
+        if !self.tool.is_raster() {
             return;
         }
         let Some(p) = response.hover_pos() else {
@@ -683,30 +927,53 @@ impl EditorSession {
         ((p - canvas.min - self.view.offset) / self.view.zoom).to_pos2()
     }
 
-    /// Push the current raster onto the undo stack (bounded), clearing redo.
-    fn push_undo(&mut self) {
-        self.undo.push(self.image.clone());
+    /// Snapshot the raster before a bake (bounded), clearing redo.
+    fn push_raster_undo(&mut self) {
+        self.push_undo(Edit::Raster(self.image.clone()));
+    }
+
+    /// Snapshot the object list before an object edit (bounded), clearing redo.
+    fn push_objects_undo(&mut self) {
+        self.push_undo(Edit::Objects(self.objects.clone()));
+    }
+
+    fn push_undo(&mut self, edit: Edit) {
+        self.undo.push(edit);
         if self.undo.len() > MAX_UNDO {
             self.undo.remove(0);
         }
         self.redo.clear();
     }
 
-    /// Undo the last bake.
+    /// Undo the last edit (raster or object), pushing its inverse onto redo.
     fn undo(&mut self) {
-        if let Some(prev) = self.undo.pop() {
-            let current = std::mem::replace(&mut self.image, prev);
-            self.redo.push(current);
-            self.reupload();
+        if let Some(edit) = self.undo.pop() {
+            let inverse = self.apply_edit(edit);
+            self.redo.push(inverse);
         }
     }
 
-    /// Redo the last undone bake.
+    /// Redo the last undone edit, pushing its inverse back onto undo.
     fn redo(&mut self) {
-        if let Some(next) = self.redo.pop() {
-            let current = std::mem::replace(&mut self.image, next);
-            self.undo.push(current);
-            self.reupload();
+        if let Some(edit) = self.redo.pop() {
+            let inverse = self.apply_edit(edit);
+            self.undo.push(inverse);
+        }
+    }
+
+    /// Restore the snapshot in `edit`, returning the displaced state (its inverse).
+    fn apply_edit(&mut self, edit: Edit) -> Edit {
+        match edit {
+            Edit::Raster(image) => {
+                let current = std::mem::replace(&mut self.image, image);
+                self.reupload();
+                Edit::Raster(current)
+            }
+            Edit::Objects(objects) => {
+                let current = std::mem::replace(&mut self.objects, objects);
+                self.selected = None; // the old index may no longer be valid
+                Edit::Objects(current)
+            }
         }
     }
 
