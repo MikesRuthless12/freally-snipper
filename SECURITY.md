@@ -44,6 +44,12 @@ remediate before any public disclosure.
   nothing anywhere. The opt-in **system tray** (Windows/macOS) only keeps the app running locally so
   the capture hotkey works while the window is closed — no network activity; timestamps shown in the
   gallery read only the local clock.
+- **Capture overlay (Phase 3):** the top-center action bar and the post-capture **editor preview**
+  run entirely **locally and in-memory**. Saving from the preview reuses the same path as before — a
+  clipboard copy plus a file written only to the folder you chose, with program-generated filenames
+  (no path-traversal input). The **Video** and **Text Extractor (OCR)** buttons are inert
+  placeholders (no capture, no recognition, no network) until their phases land. No new dependencies
+  were added, and the app stays `#![forbid(unsafe_code)]`.
 - **Third-party components** (see [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) carry their own
   advisories; we track and update them, and intend to run `cargo audit` / `cargo deny` in CI as the
   project matures.

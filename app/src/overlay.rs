@@ -34,10 +34,12 @@ fn uv_full() -> ERect {
 pub enum OverlayOutcome {
     /// Still interacting — keep the overlay open.
     Active,
-    /// User cancelled (Esc / window close / empty click in some modes).
+    /// User cancelled (Esc / window close / ✕ on the action bar).
     Cancelled,
-    /// User committed a selection; here is the cropped RGBA capture (no timer).
-    Captured(RgbaImage),
+    /// User committed a selection (no timer): the cropped RGBA capture plus the
+    /// selection's bounding rectangle in virtual pixels, so the editor hand-off
+    /// (P3.2) can position itself centered below the selection.
+    Captured { image: RgbaImage, region: VRect },
     /// User committed a selection but a Timer is set, so the pixels are grabbed
     /// later (after the countdown) — here is just the selection geometry, so the
     /// shot reflects how the screen looks *after* the delay.
@@ -50,6 +52,17 @@ pub enum Selection {
     Rect(VRect),
     /// Freeform lasso: the bounding box plus the path to mask outside it.
     Freeform { bbox: VRect, path: Vec<(i32, i32)> },
+}
+
+impl Selection {
+    /// The selection's bounding rectangle in virtual-desktop pixels — the region
+    /// the capture covers, used to anchor the editor below it (P3.2).
+    pub fn bbox(&self) -> VRect {
+        match self {
+            Selection::Rect(r) => *r,
+            Selection::Freeform { bbox, .. } => *bbox,
+        }
+    }
 }
 
 /// Live state for one capture session (one frozen snapshot + selection).
@@ -66,8 +79,14 @@ pub struct OverlaySession {
     /// frozen snapshot now — the app re-captures the live screen after the
     /// countdown. `false` (Timer Off) keeps the original crop-now behavior.
     defer: bool,
-    /// Colour for the Freeform lasso outline — the toolbar's active markup colour.
-    outline: Color32,
+    /// Active markup colour (RGBA) — editable live from the action bar's Color
+    /// button; drives the Freeform lasso outline and is reused by the editor's
+    /// tools in later phases.
+    active_color: [u8; 4],
+    /// Whether to open the editor (Toolbar 2) after capture instead of saving
+    /// straight away — toggled by the action bar's **Markup** button (P3.2),
+    /// initialized from the persisted "show capture editor" setting.
+    markup: bool,
 }
 
 impl OverlaySession {
@@ -78,7 +97,8 @@ impl OverlaySession {
         mode: SnippetMode,
         windows: Vec<WindowInfo>,
         defer: bool,
-        outline: Color32,
+        active_color: [u8; 4],
+        markup: bool,
     ) -> Self {
         let size = [
             composite.image.width() as usize,
@@ -94,7 +114,45 @@ impl OverlaySession {
             drag_start: None,
             lasso: Vec::new(),
             defer,
-            outline,
+            active_color,
+            markup,
+        }
+    }
+
+    /// Whether the capture should open in the editor after committing (P3.2) —
+    /// read by the app when the overlay ends to route the hand-off.
+    pub fn markup(&self) -> bool {
+        self.markup
+    }
+
+    /// The active markup colour (RGBA), possibly changed via the bar's Color
+    /// button — written back to settings when the overlay ends.
+    pub fn active_color(&self) -> [u8; 4] {
+        self.active_color
+    }
+
+    /// The frozen desktop bounds this session covers (virtual pixels) — used to
+    /// host and anchor the editor hand-off.
+    pub fn desktop_bounds(&self) -> VRect {
+        self.composite.bounds
+    }
+
+    /// Opaque colour for the Freeform lasso outline, from the active markup colour.
+    fn outline(&self) -> Color32 {
+        Color32::from_rgb(
+            self.active_color[0],
+            self.active_color[1],
+            self.active_color[2],
+        )
+    }
+
+    /// Switch the live capture mode (action bar Snippet ▾), dropping any in-flight
+    /// rectangle/lasso so the new mode starts from a clean slate.
+    fn set_mode(&mut self, mode: SnippetMode) {
+        if self.mode != mode {
+            self.mode = mode;
+            self.drag_start = None;
+            self.lasso.clear();
         }
     }
 
@@ -173,11 +231,13 @@ impl OverlaySession {
     }
 
     fn draw_hint(&self, painter: &egui::Painter, draw: ERect, text: &str) {
-        let pos = Pos2::new(draw.center().x, draw.min.y + 12.0);
+        // Anchored bottom-center so the hint never collides with the top-center
+        // action bar (P3.1).
+        let pos = Pos2::new(draw.center().x, draw.max.y - 16.0);
         let rect = painter
             .text(
                 pos,
-                Align2::CENTER_TOP,
+                Align2::CENTER_BOTTOM,
                 text,
                 FontId::proportional(15.0),
                 Color32::WHITE,
@@ -187,11 +247,92 @@ impl OverlaySession {
         painter.rect_filled(rect, 4.0, Color32::from_black_alpha(140));
         painter.text(
             pos,
-            Align2::CENTER_TOP,
+            Align2::CENTER_BOTTOM,
             text,
             FontId::proportional(15.0),
             Color32::WHITE,
         );
+    }
+
+    /// Draw the top-center **action bar** (Toolbar 1, P3.1). It mirrors the home
+    /// modes: the capture type (Camera / Video), the live Snippet ▾ mode switch,
+    /// the **Markup** editor-hand-off toggle, the (phase-gated) Text Extractor,
+    /// the Color picker, and ✕. Returns `true` when ✕ is clicked (cancel).
+    fn action_bar(&mut self, ctx: &egui::Context) -> bool {
+        let mut cancel = false;
+        egui::Area::new(egui::Id::new("freally_overlay_action_bar"))
+            .order(egui::Order::Foreground)
+            .anchor(Align2::CENTER_TOP, egui::vec2(0.0, 10.0))
+            .show(ctx, |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        // Capture type: Camera (photo) is active today; Video is P5.
+                        ui.selectable_label(true, "Camera")
+                            .on_hover_text("Photo capture (screenshot)");
+                        ui.add_enabled(false, egui::Button::new("Video"))
+                            .on_disabled_hover_text("Screen recording arrives in Phase 5");
+
+                        ui.separator();
+
+                        // Snippet ▾ — switch the selection shape live (P3.1).
+                        let mut new_mode = None;
+                        ui.menu_button(format!("Snippet: {}", self.mode.label()), |ui| {
+                            for mode in SnippetMode::ALL {
+                                if ui
+                                    .selectable_label(self.mode == mode, mode.label())
+                                    .clicked()
+                                {
+                                    new_mode = Some(mode);
+                                    ui.close();
+                                }
+                            }
+                        })
+                        .response
+                        .on_hover_text("Selection shape");
+                        if let Some(mode) = new_mode {
+                            self.set_mode(mode);
+                        }
+
+                        // Markup — open the editor (Toolbar 2) after the capture (P3.2).
+                        if ui
+                            .selectable_label(self.markup, "Markup")
+                            .on_hover_text(
+                                "Open the editor after capture (Toolbar 2 tools arrive in Phase 4)",
+                            )
+                            .clicked()
+                        {
+                            self.markup = !self.markup;
+                        }
+
+                        // Text Extractor — OCR → clipboard (Tesseract) lands in Phase 4.
+                        ui.add_enabled(false, egui::Button::new("Text Extractor"))
+                            .on_disabled_hover_text(
+                                "Extract text (OCR → clipboard) arrives in Phase 4",
+                            );
+
+                        ui.separator();
+
+                        // Color — the active markup colour (also the freeform outline).
+                        ui.label("Color");
+                        ui.color_edit_button_srgba_unmultiplied(&mut self.active_color)
+                            .on_hover_text("Markup colour (freeform outline + the editor's tools)");
+
+                        ui.separator();
+
+                        // Trash-can glyph (U+1F5D1) lives in egui's bundled
+                        // emoji-icon-font fallback, so it renders (unlike U+2715
+                        // "✕", which is in none of the default fonts → tofu box).
+                        if ui
+                            .button("🗑")
+                            .on_hover_text("Cancel the capture (Esc)")
+                            .clicked()
+                        {
+                            cancel = true;
+                        }
+                    });
+                });
+            });
+        cancel
     }
 
     /// Render the overlay and process input for one frame.
@@ -205,6 +346,18 @@ impl OverlaySession {
 
         // Dimmed full snapshot backdrop.
         painter.image(self.texture.id(), draw, uv_full(), DIM);
+
+        // The action bar (P3.1) is hidden mid-drag so it is never in the shot and
+        // never blocks a selection near the top of the screen (P3.2).
+        let dragging = self.drag_start.is_some() || !self.lasso.is_empty();
+        if !dragging && self.action_bar(ui.ctx()) {
+            return OverlayOutcome::Cancelled;
+        }
+        // Don't let a press on the bar (or an open Snippet ▾ menu) fall through to
+        // the canvas as a selection drag / commit. `is_pointer_over_egui` is true
+        // over a foreground area (the bar/menu) and false over the background
+        // canvas — exactly the guard we want.
+        let over_ui = ui.ctx().is_pointer_over_egui();
 
         let resp = ui.interact(
             draw,
@@ -220,7 +373,7 @@ impl OverlaySession {
 
         let outcome = match self.mode {
             SnippetMode::Rectangle => {
-                if resp.drag_started() {
+                if resp.drag_started() && !over_ui {
                     self.drag_start = pointer_v;
                 }
                 if let (Some(a), Some(b)) = (self.drag_start, pointer_v) {
@@ -247,7 +400,7 @@ impl OverlaySession {
                 if let Some(bounds) = hovered {
                     self.draw_bright_selection(&painter, draw, bounds);
                     self.draw_size_label(&painter, draw, bounds);
-                    if resp.clicked() {
+                    if resp.clicked() && !over_ui {
                         return self.commit_rect(bounds);
                     }
                 }
@@ -255,13 +408,15 @@ impl OverlaySession {
                 OverlayOutcome::Active
             }
             SnippetMode::Freeform => {
-                if resp.drag_started() {
+                if resp.drag_started() && !over_ui {
                     self.lasso.clear();
                     if let Some(p) = pointer_v {
                         self.lasso.push(p);
                     }
                 }
-                if resp.dragged() {
+                // Only extend an already-started lasso, so a press that began on
+                // the action bar can't seed a stray path.
+                if resp.dragged() && !self.lasso.is_empty() {
                     if let Some(p) = pointer_v {
                         // Thin the path: keep points a few pixels apart so the
                         // mask's scanline fill stays cheap on release.
@@ -275,7 +430,7 @@ impl OverlaySession {
                     }
                 }
                 self.draw_lasso(&painter, draw);
-                if resp.drag_stopped() {
+                if resp.drag_stopped() && !self.lasso.is_empty() {
                     return self.commit_lasso();
                 }
                 if self.lasso.is_empty() {
@@ -293,7 +448,7 @@ impl OverlaySession {
                     draw,
                     "Full screen  ·  Click or Enter to capture  ·  Esc to cancel",
                 );
-                if resp.clicked() || enter {
+                if (resp.clicked() && !over_ui) || enter {
                     return self.commit_rect(self.composite.bounds);
                 }
                 OverlayOutcome::Active
@@ -337,7 +492,7 @@ impl OverlaySession {
         }
         // Map points to screen space on the fly (no per-frame Vec allocation).
         // Outline drawn in the toolbar's active markup colour.
-        let stroke = Stroke::new(2.0, self.outline);
+        let stroke = Stroke::new(2.0, self.outline());
         let first = self.to_screen(draw, first_v);
         let mut prev = first;
         for &v in rest {
@@ -377,8 +532,9 @@ impl OverlaySession {
         if self.defer {
             return OverlayOutcome::Selected(selection);
         }
+        let region = selection.bbox();
         match apply_selection(&self.composite, &selection) {
-            Some(img) => OverlayOutcome::Captured(img),
+            Some(image) => OverlayOutcome::Captured { image, region },
             None => OverlayOutcome::Active,
         }
     }
@@ -486,6 +642,18 @@ fn clear_alpha_span(img: &mut RgbaImage, y: u32, x0: i32, x1: i32) {
 mod tests {
     use super::*;
     use freally_capture::image::Rgba;
+
+    #[test]
+    fn selection_bbox_returns_capture_region() {
+        let r = VRect::new(10, 20, 30, 40);
+        assert_eq!(Selection::Rect(r).bbox(), r);
+        let bbox = VRect::new(-5, -5, 12, 12);
+        let free = Selection::Freeform {
+            bbox,
+            path: vec![(-5, -5), (7, -5), (7, 7)],
+        };
+        assert_eq!(free.bbox(), bbox);
+    }
 
     #[test]
     fn bounding_rect_covers_all_points() {

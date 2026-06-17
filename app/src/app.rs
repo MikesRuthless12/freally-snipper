@@ -18,6 +18,7 @@ use freally_capture::image::RgbaImage;
 use freally_capture::{Composite, Rect as VRect, WindowInfo};
 
 use crate::delivery::Delivery;
+use crate::editor::{EditorOutcome, EditorSession};
 use crate::gallery::Gallery;
 use crate::hotkey::Hotkeys;
 use crate::overlay::{apply_selection, OverlayOutcome, OverlaySession, Selection};
@@ -96,20 +97,27 @@ enum CaptureState {
     },
     /// Selection overlay is live with a frozen snapshot.
     Active(Box<OverlaySession>),
+    /// Post-capture editor hand-off (Toolbar 2 shell, P3.2): the capture is shown
+    /// centered below the selection with Save / Discard, hosted in the overlay
+    /// window. Reached only when Markup is armed (else the capture saves directly).
+    Editing(Box<EditorSession>),
     /// A visible countdown badge is showing before the *live* snapshot (Timer ▾).
     /// `selection` is `None` for full screen (re-grab the whole desktop) or the
     /// chosen region for Rectangle / Window / Freeform — grabbed live after the
     /// countdown so the shot reflects whatever the user set up during the delay.
+    /// `markup` carries the editor-hand-off choice across the countdown.
     Counting {
         since: Instant,
         total: Duration,
         selection: Option<Selection>,
+        markup: bool,
     },
     /// Badge hidden; waiting `HIDE_DELAY` before grabbing the *live* desktop for a
     /// timed capture (then crop/mask to `selection`, or keep the whole desktop).
     GrabbingLive {
         selection: Option<Selection>,
         since: Instant,
+        markup: bool,
     },
 }
 
@@ -206,13 +214,15 @@ impl FreallySnipperApp {
     }
 
     /// Begin the Timer ▾ countdown (morph to the badge), to be followed by the
-    /// live snapshot. `selection` is `None` for full screen, else the region.
-    fn start_countdown(&mut self, ctx: &egui::Context, selection: Option<Selection>) {
+    /// live snapshot. `selection` is `None` for full screen, else the region;
+    /// `markup` carries whether to open the editor on the resulting capture.
+    fn start_countdown(&mut self, ctx: &egui::Context, selection: Option<Selection>, markup: bool) {
         morph_to_countdown_badge(ctx, screen_center(ctx));
         self.capture = CaptureState::Counting {
             since: Instant::now(),
             total: self.settings.timer_delay.duration(),
             selection,
+            markup,
         };
         ctx.request_repaint();
     }
@@ -232,13 +242,7 @@ impl FreallySnipperApp {
                 }
             }
             if let Some(last) = results.last() {
-                let mut message = last.message.clone();
-                // The editor (Toolbar 2) lands in Phase 4; until then, note where
-                // it will open so the "Show capture editor" toggle is observable.
-                if self.settings.show_capture_editor && last.saved_path.is_some() {
-                    message.push_str(" · editor opens here in Phase 4");
-                }
-                self.status = Some(message);
+                self.status = Some(last.message.clone());
             }
             if recents_changed {
                 self.persist();
@@ -302,6 +306,10 @@ impl FreallySnipperApp {
                 // Rendering + input happen in `ui`; just keep frames flowing.
                 ctx.request_repaint();
             }
+            CaptureState::Editing(_) => {
+                // The editor is a static surface; egui repaints on input. Nothing
+                // to drive here.
+            }
             CaptureState::Counting { since, total, .. } => {
                 if since.elapsed() < *total {
                     // The badge is visible; wake a few times a second (enough for a
@@ -311,14 +319,18 @@ impl FreallySnipperApp {
                 }
                 // Countdown done: hide the badge and settle before the live grab,
                 // so the badge never lands in the shot.
-                let selection = match std::mem::replace(&mut self.capture, CaptureState::Idle) {
-                    CaptureState::Counting { selection, .. } => selection,
-                    _ => None,
-                };
+                let (selection, markup) =
+                    match std::mem::replace(&mut self.capture, CaptureState::Idle) {
+                        CaptureState::Counting {
+                            selection, markup, ..
+                        } => (selection, markup),
+                        _ => (None, false),
+                    };
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
                 self.capture = CaptureState::GrabbingLive {
                     selection,
                     since: Instant::now(),
+                    markup,
                 };
                 ctx.request_repaint();
             }
@@ -337,26 +349,31 @@ impl FreallySnipperApp {
     /// full screen *with* a Timer — start the countdown to a live grab.
     fn snapshot_after_arming(&mut self, ctx: &egui::Context, mode: SnippetMode) {
         let timed = self.settings.timer_delay != TimerDelay::None;
+        // Whether to open the editor after the capture — the persisted setting is
+        // the starting point; the overlay's Markup button can flip it per-capture.
+        let markup = self.settings.show_capture_editor;
         // Full screen + Timer needs no frozen snapshot (there's no selection) —
         // count down, then grab the live desktop. Skip the wasted full grab here.
         if mode == SnippetMode::FullScreen && timed {
-            self.start_countdown(ctx, None);
+            self.start_countdown(ctx, None, markup);
             return;
         }
         match capture_desktop() {
             Ok((composite, windows)) => {
                 if mode == SnippetMode::FullScreen {
-                    self.finish(ctx, Some(composite.into_image()));
+                    let desktop = composite.bounds;
+                    self.deliver_or_edit(ctx, composite.into_image(), None, desktop, markup);
                 } else {
                     let bounds = composite.bounds;
-                    // Freeform outline uses the toolbar's active markup colour.
-                    let outline = egui::Color32::from_rgb(
-                        self.settings.active_color[0],
-                        self.settings.active_color[1],
-                        self.settings.active_color[2],
+                    let session = OverlaySession::new(
+                        ctx,
+                        composite,
+                        mode,
+                        windows,
+                        timed,
+                        self.settings.active_color,
+                        markup,
                     );
-                    let session =
-                        OverlaySession::new(ctx, composite, mode, windows, timed, outline);
                     self.capture = CaptureState::Active(Box::new(session));
                     morph_to_overlay(ctx, bounds);
                     ctx.request_repaint();
@@ -370,8 +387,10 @@ impl FreallySnipperApp {
     /// produce the final image — the whole desktop, or the chosen region
     /// cropped/masked from the live grab.
     fn grab_live(&mut self, ctx: &egui::Context) {
-        let selection = match std::mem::replace(&mut self.capture, CaptureState::Idle) {
-            CaptureState::GrabbingLive { selection, .. } => selection,
+        let (selection, markup) = match std::mem::replace(&mut self.capture, CaptureState::Idle) {
+            CaptureState::GrabbingLive {
+                selection, markup, ..
+            } => (selection, markup),
             other => {
                 self.capture = other;
                 return;
@@ -379,12 +398,14 @@ impl FreallySnipperApp {
         };
         match capture_desktop() {
             Ok((composite, _windows)) => {
+                let desktop = composite.bounds;
+                let region = selection.as_ref().map(Selection::bbox);
                 let image = match &selection {
                     Some(sel) => apply_selection(&composite, sel),
                     None => Some(composite.into_image()),
                 };
                 match image {
-                    Some(img) => self.finish(ctx, Some(img)),
+                    Some(img) => self.deliver_or_edit(ctx, img, region, desktop, markup),
                     None => self.fail(ctx, "Selection produced no image.".to_owned()),
                 }
             }
@@ -392,9 +413,35 @@ impl FreallySnipperApp {
         }
     }
 
+    /// Route a finished capture: open the editor (Toolbar 2 shell) anchored below
+    /// the selection when Markup is armed, otherwise hand straight to delivery
+    /// (clipboard + save) exactly as before. `region` anchors the editor card;
+    /// `desktop` is the host desktop bounds.
+    fn deliver_or_edit(
+        &mut self,
+        ctx: &egui::Context,
+        image: RgbaImage,
+        region: Option<VRect>,
+        desktop: VRect,
+        markup: bool,
+    ) {
+        // No editor, or an empty crop (let `finish` report it) → straight to save.
+        if !markup || image.width() == 0 || image.height() == 0 {
+            self.finish(ctx, Some(image));
+            return;
+        }
+        let session = EditorSession::new(ctx, image, region, (desktop.x, desktop.y));
+        // Host the editor in the full-desktop overlay window so the card can anchor
+        // to the on-screen selection (the immediate path is already morphed; the
+        // timed path returns here from a hidden window).
+        morph_to_overlay(ctx, desktop);
+        self.capture = CaptureState::Editing(Box::new(session));
+        ctx.request_repaint();
+    }
+
     /// Draw the overlay into the (now full-desktop) window and act on the result.
     fn overlay_ui(&mut self, ui: &mut egui::Ui) {
-        let outcome = match &mut self.capture {
+        let (outcome, markup, new_color, desktop) = match &mut self.capture {
             CaptureState::Active(session) => {
                 let mut out = session.ui(ui);
                 if ui.input(|i| i.viewport().close_requested()) {
@@ -404,6 +451,57 @@ impl FreallySnipperApp {
                         .send_viewport_cmd(egui::ViewportCommand::CancelClose);
                     out = OverlayOutcome::Cancelled;
                 }
+                (
+                    out,
+                    session.markup(),
+                    session.active_color(),
+                    session.desktop_bounds(),
+                )
+            }
+            _ => return,
+        };
+
+        // Reflect a colour picked on the action bar so the choice carries to the
+        // next snip + the home toolbar. Defer the disk write while the pointer is
+        // held (dragging the colour-picker slider) and flush on release — exactly
+        // like the home UI, so a drag never rewrites settings.json every frame.
+        if self.settings.active_color != new_color {
+            self.settings.active_color = new_color;
+            self.needs_persist = true;
+        }
+        if self.needs_persist && !ui.input(|i| i.pointer.any_down()) {
+            self.persist();
+            self.needs_persist = false;
+        }
+
+        let ctx = ui.ctx().clone();
+        match outcome {
+            OverlayOutcome::Active => ctx.request_repaint(),
+            OverlayOutcome::Cancelled => self.finish(&ctx, None),
+            OverlayOutcome::Captured { image, region } => {
+                self.deliver_or_edit(&ctx, image, Some(region), desktop, markup);
+            }
+            // Timer set: selection chosen, now run the countdown then grab live.
+            OverlayOutcome::Selected(selection) => {
+                self.start_countdown(&ctx, Some(selection), markup)
+            }
+        }
+    }
+
+    /// Draw the post-capture editor (Toolbar 2 shell, P3.2) and act on Save /
+    /// Discard. Hosted in the full-desktop overlay window, anchored below the
+    /// selection.
+    fn editor_ui(&mut self, ui: &mut egui::Ui) {
+        let outcome = match &mut self.capture {
+            CaptureState::Editing(session) => {
+                let mut out = session.ui(ui);
+                if ui.input(|i| i.viewport().close_requested()) {
+                    // A close request while editing discards the capture rather than
+                    // quitting the app.
+                    ui.ctx()
+                        .send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                    out = EditorOutcome::Discard;
+                }
                 out
             }
             _ => return,
@@ -411,11 +509,18 @@ impl FreallySnipperApp {
 
         let ctx = ui.ctx().clone();
         match outcome {
-            OverlayOutcome::Active => ctx.request_repaint(),
-            OverlayOutcome::Cancelled => self.finish(&ctx, None),
-            OverlayOutcome::Captured(img) => self.finish(&ctx, Some(img)),
-            // Timer set: selection chosen, now run the countdown then grab live.
-            OverlayOutcome::Selected(selection) => self.start_countdown(&ctx, Some(selection)),
+            EditorOutcome::Active => {}
+            EditorOutcome::Save => {
+                if let CaptureState::Editing(session) =
+                    std::mem::replace(&mut self.capture, CaptureState::Idle)
+                {
+                    self.finish(&ctx, Some(session.into_image()));
+                }
+            }
+            EditorOutcome::Discard => {
+                self.finish(&ctx, None);
+                self.status = Some("Capture discarded.".to_owned());
+            }
         }
     }
 
@@ -909,16 +1014,19 @@ impl FreallySnipperApp {
                 if ui
                     .checkbox(&mut show_editor, "Show the capture editor after capturing")
                     .on_hover_text(
-                        "Open the image editor (Toolbar 2) after each capture instead of saving \
-                         straight away. The editor arrives in Phase 4; until then captures save \
-                         as they do now.",
+                        "Open the editor below each capture (Save / Discard) instead of saving \
+                         straight away. You can also toggle this per-capture with Markup on the \
+                         capture bar. The full Toolbar 2 markup tools arrive in Phase 4.",
                     )
                     .changed()
                 {
                     self.settings.show_capture_editor = show_editor;
                     *dirty = true;
                 }
-                ui.small("The in-app editor (Toolbar 2) arrives in Phase 4; until then captures save directly.");
+                ui.small(
+                    "Markup tools (Toolbar 2) arrive in Phase 4; for now the editor shows a \
+                     Save / Discard preview.",
+                );
 
                 ui.add_space(10.0);
                 let tray_available = self.tray.is_some();
@@ -1097,6 +1205,8 @@ impl eframe::App for FreallySnipperApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         if matches!(self.capture, CaptureState::Active(_)) {
             self.overlay_ui(ui);
+        } else if matches!(self.capture, CaptureState::Editing(_)) {
+            self.editor_ui(ui);
         } else if matches!(self.capture, CaptureState::Counting { .. }) {
             self.countdown_ui(ui);
         } else {

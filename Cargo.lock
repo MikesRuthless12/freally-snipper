@@ -1409,11 +1409,11 @@ dependencies = [
 
 [[package]]
 name = "freally-asr"
-version = "0.19.85"
+version = "0.30.0"
 
 [[package]]
 name = "freally-capture"
-version = "0.19.85"
+version = "0.30.0"
 dependencies = [
  "log",
  "xcap",
@@ -1421,11 +1421,11 @@ dependencies = [
 
 [[package]]
 name = "freally-editor"
-version = "0.19.85"
+version = "0.30.0"
 
 [[package]]
 name = "freally-snipper"
-version = "0.19.85"
+version = "0.30.0"
 dependencies = [
  "arboard",
  "chrono",
@@ -1445,7 +1445,7 @@ dependencies = [
 
 [[package]]
 name = "freally-video"
-version = "0.19.85"
+version = "0.30.0"
 
 [[package]]
 name = "futures-channel"

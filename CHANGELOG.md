@@ -6,6 +6,21 @@ All notable changes to Freally Snipper are documented here. The format is based 
 
 ## [Unreleased]
 
+## [0.30.0] — 2026-06-17 — Capture overlay action bar
+
+A top-center action bar on the capture overlay, with live mode switching and a hand-off to the editor.
+
+### Added
+- An action bar (Camera · Video · Snippet ▾ · Markup · Text Extractor · Color · 🗑) sits at the top of the capture overlay.
+- Snippet ▾ switches the selection shape (rectangle / window / freeform / full screen) live, mid-capture.
+- Markup hands a finished snip to an editor preview centered below the selection (Save / Discard); the bar hides while you drag.
+- Color sets the markup colour on the overlay itself, and the 🗑 button (or Esc) cancels.
+
+### Changed
+- The capture hint moved to the bottom of the overlay so it never sits under the action bar.
+- Video and Text Extractor show on the bar but are disabled, each labelled with the phase it arrives in (5 and 4).
+- Version bumped to 0.30.0 — the Phase 3 step on the ladder to v1.0.0.
+
 ## [0.19.85] — 2026-06-17 — Windows release polish
 
 The downloaded Windows build now carries its icon and runs without a console window.
