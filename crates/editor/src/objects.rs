@@ -307,9 +307,9 @@ impl Object {
             }
             ShapeKind::Arrow => {
                 raster::bake_solid_path(image, &[tup(self.a), tup(self.b)], radius, rgb);
-                for h in arrow_head(self.a, self.b, self.width) {
-                    raster::bake_solid_path(image, &[tup(h), tup(self.b)], radius, rgb);
-                }
+                // Solid triangular head so it reads as an arrow at any width (not a "V").
+                let [h1, h2] = arrow_head(self.a, self.b, self.width);
+                raster::fill_triangle(image, tup(h1), tup(self.b), tup(h2), self.color);
             }
         }
     }
@@ -344,9 +344,13 @@ impl Object {
             ShapeKind::Arrow => {
                 let b = to_screen(self.b);
                 painter.line_segment([to_screen(self.a), b], stroke);
-                for h in arrow_head(self.a, self.b, self.width) {
-                    painter.line_segment([to_screen(h), b], stroke);
-                }
+                // Solid triangular head (matches the bake) so it never looks like a "V".
+                let [h1, h2] = arrow_head(self.a, self.b, self.width);
+                painter.add(egui::Shape::convex_polygon(
+                    vec![to_screen(h1), b, to_screen(h2)],
+                    color,
+                    Stroke::NONE,
+                ));
             }
         }
     }

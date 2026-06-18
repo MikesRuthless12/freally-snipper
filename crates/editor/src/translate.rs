@@ -113,9 +113,15 @@ impl Translator {
             generated.push(next);
         }
 
-        self.tokenizer
+        let out = self
+            .tokenizer
             .decode(&generated, true)
-            .map_err(|e| format!("detokenize: {e}"))
+            .map_err(|e| format!("detokenize: {e}"))?;
+        // MADLAD/SentencePiece can prefix the output with a space marker (▁, U+2581)
+        // or a no-break space; normalize ▁→space, then trim all surrounding spaces
+        // (`trim` covers U+00A0). So "Yes!"→Welsh yields "Ie", not "\u{00a0}Ie".
+        let out = out.replace('\u{2581}', " ");
+        Ok(out.trim().to_owned())
     }
 }
 

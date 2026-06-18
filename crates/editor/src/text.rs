@@ -69,9 +69,14 @@ pub fn render(text: &str, font_px: f32, family: FontFamily, color: [u8; 4]) -> O
 
     for (row, line) in lines.iter().enumerate() {
         let rtl = is_rtl(line);
-        let bytes = if rtl { ARABIC } else { family.bytes() };
-        let (Some(face), Ok(ab)) = (Face::from_slice(bytes, 0), FontRef::try_from_slice(bytes))
-        else {
+        let primary = if rtl { ARABIC } else { family.bytes() };
+        // Fall back to an installed system font for scripts the bundled fonts don't
+        // cover (e.g. translated Tamil / Telugu / Thai / Hebrew / CJK).
+        let (bytes, index) = font_for_line(primary, line);
+        let (Some(face), Ok(ab)) = (
+            Face::from_slice(bytes, index),
+            FontRef::try_from_slice_and_index(bytes, index),
+        ) else {
             continue;
         };
         let scaled = ab.as_scaled(PxScale::from(font_px));
@@ -103,6 +108,7 @@ pub fn render(text: &str, font_px: f32, family: FontFamily, color: [u8; 4]) -> O
             placed.push(Placed {
                 id: GlyphId(info.glyph_id as u16),
                 bytes,
+                index,
                 x: gx,
                 y: gy,
             });
@@ -122,7 +128,7 @@ pub fn render(text: &str, font_px: f32, family: FontFamily, color: [u8; 4]) -> O
     let color_a = ca as f32 / 255.0;
     for g in &placed {
         // Re-parse is cheap and avoids threading a borrowed font through `Placed`.
-        let Ok(font) = FontRef::try_from_slice(g.bytes) else {
+        let Ok(font) = FontRef::try_from_slice_and_index(g.bytes, g.index) else {
             continue;
         };
         let glyph = Glyph {
@@ -152,10 +158,27 @@ pub fn render(text: &str, font_px: f32, family: FontFamily, color: [u8; 4]) -> O
     Some(stamp)
 }
 
+/// The font (bytes + face index) to render `line` with: the `primary` bundled font
+/// if it covers every character, otherwise an installed system font that covers the
+/// first uncovered one (so translated Indic / Thai / Hebrew / CJK text isn't tofu).
+fn font_for_line(primary: &'static [u8], line: &str) -> (&'static [u8], u32) {
+    let Ok(font) = FontRef::try_from_slice(primary) else {
+        return (primary, 0);
+    };
+    let uncovered = line
+        .chars()
+        .find(|&c| !c.is_whitespace() && font.glyph_id(c).0 == 0);
+    match uncovered {
+        Some(c) => crate::fonts::fallback_for(c).unwrap_or((primary, 0)),
+        None => (primary, 0),
+    }
+}
+
 /// A shaped glyph placed in stamp space.
 struct Placed {
     id: GlyphId,
     bytes: &'static [u8],
+    index: u32,
     x: f32,
     y: f32,
 }

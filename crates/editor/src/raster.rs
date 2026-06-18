@@ -16,13 +16,13 @@ use freally_capture::image::{Rgba, RgbaImage};
 pub enum Paint {
     /// Opaque colour — Pen / Brush.
     Solid([u8; 3]),
-    /// Translucent highlight at `alpha` (0..=1). When `text_only`, the highlight
-    /// is restricted to detected text pixels within the stroke band (P4.2's
-    /// text-aware highlighter); the image background is left untouched.
+    /// Translucent highlight at `alpha` (0..=1). When `text_aware`, the highlight
+    /// colours the stroke band but **spares detected text pixels**, so the text
+    /// shows through crisply (like a real highlighter) instead of being tinted.
     Highlight {
         color: [u8; 3],
         alpha: f32,
-        text_only: bool,
+        text_aware: bool,
     },
     /// Erase to opaque white.
     White,
@@ -56,13 +56,13 @@ pub fn bake_stroke(
         return;
     };
     let cov = rasterize_coverage(points, radius, bbox);
-    let text = match paint {
+    let mask = match paint {
         Paint::Highlight {
-            text_only: true, ..
-        } => Some(text_mask(image, bbox, &cov)),
+            text_aware: true, ..
+        } => Some(highlight_band_mask(image, bbox, &cov, radius)),
         _ => None,
     };
-    composite(image, Some(pristine), bbox, &cov, text.as_deref(), paint);
+    composite(image, Some(pristine), bbox, &cov, mask.as_deref(), paint);
 }
 
 /// Bake an anti-aliased solid-colour path (a polyline with round caps) into
@@ -111,6 +111,46 @@ pub fn fill_ellipse(image: &mut RgbaImage, center: (f32, f32), radius: (f32, f32
             let nx = (x as f32 + 0.5 - center.0) / rx;
             let ny = (y as f32 + 0.5 - center.1) / ry;
             if nx * nx + ny * ny <= 1.0 {
+                let out = blend_over(image.get_pixel(x, y).0, color);
+                image.put_pixel(x, y, Rgba(out));
+            }
+        }
+    }
+}
+
+/// Alpha-composite a solid `color` into the triangle `(p0, p1, p2)` (image space).
+/// Used for solid shape fills (e.g. the arrowhead) so it reads as a triangle at any
+/// stroke width instead of two separate barbs.
+pub fn fill_triangle(
+    image: &mut RgbaImage,
+    p0: (f32, f32),
+    p1: (f32, f32),
+    p2: (f32, f32),
+    color: [u8; 4],
+) {
+    let (w, h) = (image.width(), image.height());
+    let minx = p0.0.min(p1.0).min(p2.0).floor().clamp(0.0, w as f32) as u32;
+    let miny = p0.1.min(p1.1).min(p2.1).floor().clamp(0.0, h as f32) as u32;
+    let maxx = p0.0.max(p1.0).max(p2.0).ceil().clamp(0.0, w as f32) as u32;
+    let maxy = p0.1.max(p1.1).max(p2.1).ceil().clamp(0.0, h as f32) as u32;
+    let edge = |a: (f32, f32), b: (f32, f32), px: f32, py: f32| {
+        (px - a.0) * (b.1 - a.1) - (py - a.1) * (b.0 - a.0)
+    };
+    let area = edge(p0, p1, p2.0, p2.1);
+    if area.abs() < 1e-3 {
+        return; // degenerate triangle
+    }
+    for y in miny..maxy {
+        for x in minx..maxx {
+            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+            let (w0, w1, w2) =
+                (edge(p1, p2, px, py), edge(p2, p0, px, py), edge(p0, p1, px, py));
+            let inside = if area > 0.0 {
+                w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0
+            } else {
+                w0 <= 0.0 && w1 <= 0.0 && w2 <= 0.0
+            };
+            if inside {
                 let out = blend_over(image.get_pixel(x, y).0, color);
                 image.put_pixel(x, y, Rgba(out));
             }
@@ -279,6 +319,49 @@ fn text_mask(image: &RgbaImage, bbox: Bbox, cov: &[f32]) -> Vec<bool> {
     mask
 }
 
+/// The pixels the text-aware highlighter should paint: the background **near**
+/// detected text (within `radius`, so it bridges the gaps between letters and fills
+/// the line band), **excluding the glyphs themselves** (so the text shows through).
+/// Returns an all-false mask when the stroke covers no text — so blank areas are
+/// never highlighted.
+fn highlight_band_mask(image: &RgbaImage, bbox: Bbox, cov: &[f32], radius: f32) -> Vec<bool> {
+    let glyph = text_mask(image, bbox, cov);
+    if !glyph.iter().any(|&g| g) {
+        return vec![false; glyph.len()]; // no text under the stroke → paint nothing
+    }
+    let r = (radius.round() as i32).clamp(3, 64);
+    let near = dilate(&glyph, bbox.w, bbox.h, r);
+    glyph
+        .iter()
+        .zip(near.iter())
+        .map(|(&g, &n)| n && !g)
+        .collect()
+}
+
+/// Grow `mask` by `r` pixels in each direction (separable box dilation) — used to
+/// connect detected glyphs into a continuous text band.
+fn dilate(mask: &[bool], w: u32, h: u32, r: i32) -> Vec<bool> {
+    let (wi, hi) = (w as i32, h as i32);
+    let at = |x: i32, y: i32, m: &[bool]| m[(y * wi + x) as usize];
+    // Horizontal pass.
+    let mut horiz = vec![false; mask.len()];
+    for y in 0..hi {
+        for x in 0..wi {
+            let (x0, x1) = ((x - r).max(0), (x + r).min(wi - 1));
+            horiz[(y * wi + x) as usize] = (x0..=x1).any(|xx| at(xx, y, mask));
+        }
+    }
+    // Vertical pass over the horizontal result.
+    let mut out = vec![false; mask.len()];
+    for y in 0..hi {
+        for x in 0..wi {
+            let (y0, y1) = ((y - r).max(0), (y + r).min(hi - 1));
+            out[(y * wi + x) as usize] = (y0..=y1).any(|yy| at(x, yy, &horiz));
+        }
+    }
+    out
+}
+
 /// Rec. 601 luma of an RGBA pixel (alpha ignored).
 fn luma(px: &Rgba<u8>) -> u8 {
     let [r, g, b, _] = px.0;
@@ -292,7 +375,7 @@ fn composite(
     pristine: Option<&RgbaImage>,
     bbox: Bbox,
     cov: &[f32],
-    text: Option<&[bool]>,
+    paint_mask: Option<&[bool]>,
     paint: &Paint,
 ) {
     // Pristine is only usable for Restore when it matches the image dimensions.
@@ -304,9 +387,11 @@ fn composite(
             if c <= 0.0 {
                 continue;
             }
-            // Text-aware highlighter: only paint detected text pixels.
-            if let Some(text) = text {
-                if !text[idx] {
+            // Text-aware highlighter: paint only where the precomputed band mask says
+            // so — the background around/between text (glyphs spared so text shows
+            // through), and nothing in blank areas with no text underneath.
+            if let Some(mask) = paint_mask {
+                if !mask[idx] {
                     continue;
                 }
             }
@@ -418,7 +503,7 @@ mod tests {
             &Paint::Highlight {
                 color: [255, 255, 0],
                 alpha: 0.5,
-                text_only: false,
+                text_aware: false,
             },
         );
         // Free mode tints the white background too (it's no longer pure white).
@@ -430,7 +515,7 @@ mod tests {
     }
 
     #[test]
-    fn text_aware_highlight_spares_the_background() {
+    fn text_aware_highlight_colors_band_but_spares_text() {
         // Same scene: white background + a black text column.
         let mut img = solid(12, 12, [255, 255, 255, 255]);
         for y in 0..12 {
@@ -446,16 +531,41 @@ mod tests {
             &Paint::Highlight {
                 color: [255, 255, 0],
                 alpha: 0.5,
-                text_only: true,
+                text_aware: true,
             },
         );
-        // The white background under the band is left untouched...
-        assert_eq!(img.get_pixel(2, 6).0, [255, 255, 255, 255]);
-        // ...while the dark text pixel is tinted toward yellow.
-        let text_px = img.get_pixel(5, 6).0;
-        assert!(
-            text_px != [0, 0, 0, 255],
-            "text pixel should be highlighted"
+        // The band background is tinted (a visible highlight)...
+        let bg = img.get_pixel(2, 6).0;
+        assert!(bg != [255, 255, 255, 255], "band background should be highlighted");
+        // ...while the dark text shows through crisply (spared / untouched).
+        assert_eq!(
+            img.get_pixel(5, 6).0,
+            [0, 0, 0, 255],
+            "text should be spared so it shows through"
+        );
+    }
+
+    #[test]
+    fn text_aware_highlight_skips_blank_areas() {
+        // All-white, no text under the stroke → text-aware paints nothing.
+        let mut img = solid(12, 12, [255, 255, 255, 255]);
+        let pristine = img.clone();
+        let pts: Vec<(f32, f32)> = (1..11).map(|x| (x as f32, 6.0)).collect();
+        bake_stroke(
+            &mut img,
+            &pristine,
+            &pts,
+            2.0,
+            &Paint::Highlight {
+                color: [255, 255, 0],
+                alpha: 0.5,
+                text_aware: true,
+            },
+        );
+        assert_eq!(
+            img.get_pixel(5, 6).0,
+            [255, 255, 255, 255],
+            "a blank area must not be highlighted"
         );
     }
 
