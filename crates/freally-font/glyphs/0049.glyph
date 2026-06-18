@@ -1,0 +1,19 @@
+# I — U+0049 capital eye. OUR OWN uniform-width stroked centerline (stroke 84),
+# reconstructed onto Noto's SERIFED 'I' shape on the grid (NOT a copy of Noto's
+# curve data). Reverse-engineered Noto: central stem inner edges x122..210 (centre
+# x=166) running y~70..629 with serif lips, top serif flat top y=700 spanning
+# x39..292, bottom serif flat foot y=0 spanning x39..292. We take the MEDIAN of each
+# stroke and let the three strokes UNION: a vertical stem + two horizontal serif bars.
+# Each centre line sits ~42 inside Noto's outer edge so stroking 84 lands on Noto.
+# Flat top/foot (not a round letter, no overshoot). Advance = Noto (332).
+advance 332
+stroke 84
+# vertical stem, centre x=166 (median of Noto's 122..210), full cap height
+M 166 658
+L 166 42
+# top serif crossbar, median y=658, full serif width 39..292
+M 39 658
+L 292 658
+# bottom serif crossbar, median y=42, full serif width 39..292
+M 39 42
+L 292 42

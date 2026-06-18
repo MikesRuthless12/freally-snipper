@@ -1,0 +1,32 @@
+# R — U+0052 capital arr. OUR OWN uniform-width stroked centerline (stroke 84),
+# reconstructed to sit on Noto's shape on the grid (NOT a copy of Noto's curve data).
+# We reverse-engineered Noto's R outline, took the MEDIAN line midway between each
+# stroke's outer and inner edges, then fit OUR own centre lines through it so stroking
+# at 84 lands ours on Noto's outline. Uniform brush matched to S, C, G, J, o, etc.
+# Noto skeleton (our grid, cap 700): stem outer x95..183 -> centre x139, full height;
+# bowl outer top y700 / right x543 / junction y~289, inner top y624 / right x452 /
+# bottom y364 -> median top y662, right x~504, bottom-bar y326; leg outer 403,314->595,0
+# and inner 323,289->492,0 -> median 363,301 -> 544,2. Advance = Noto (609).
+advance 609
+stroke 84
+
+# --- vertical stem: median centre line x=139, full cap height ---
+M 139 0
+L 139 700
+
+# --- bowl: MEDIAN loop, clockwise from the top-left (on the stem centre). Top bar
+# median y=662; right lobe peak median x~504 at y~499 (so the outer ring lands on Noto's
+# x~543 and the inner ring on Noto's counter ~452); bottom bar median y=326 back to the
+# stem. Stroking 84 lands the outer ring on Noto's bowl; the counter/hole appears inside.
+M 139 662
+L 316 662
+C 424 662 506 588 504 499
+C 502 419 456 372 360 328
+L 139 326
+
+# --- leg: straight diagonal median line on Noto's leg MEDIAN. Top centre = midpoint of
+# Noto's leg tops (403,314)&(323,289) -> (363,301); foot centre = midpoint of Noto's
+# feet (595,0)&(492,0) -> (544,2). Stroking 84 lands ours on Noto's diagonal; the foot
+# is a perpendicular butt cap (monoline house style) straddling Noto's flat foot.
+M 363 301
+L 544 2

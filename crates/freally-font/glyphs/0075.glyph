@@ -1,0 +1,11 @@
+# u — U+0075. The 'n' rotated 180 degrees about (305,262.5): (x,y) -> (610-x, 525-y).
+# This inherits the n's branch as a NOTCH on the RIGHT side toward the bottom (the right
+# stem's foot extends past where the bottom arch branches off). Uniform stroke 84.
+advance 605
+stroke 84
+M 484 525
+L 484 0
+M 484 120
+C 420 77 354 32 302 32
+C 200 32 126 55 126 145
+L 126 525

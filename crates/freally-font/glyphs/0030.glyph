@@ -1,0 +1,22 @@
+# 0 — U+0030 zero. OUR OWN uniform-width stroked centerline (stroke 84),
+# reconstructed onto Noto's round-bowl shape on the grid (NOT a copy of Noto's
+# curve data). Reverse-engineered Noto: outer edge x48..513 y-10..711, inner
+# counter x134..425 y64..637; centre (280,350). MEDIAN ring (midway between outer
+# & inner edges): rx (232.5+145.5)/2=189, ry (360.5+286.5)/2=323.5. Stroking that
+# ring at 84 lands ours on Noto's outline; the counter/hole appears inside
+# automatically. Advance = Noto (560). Replaces the old thick/thin-contrast
+# version -> matches the uniform style of O, S, C, G, J and all lowercase.
+advance 560
+stroke 84
+# MEDIAN ring as 4 cubics (our own superelliptical fit): flatter long sides +
+# squarer corners than a pure ellipse, to track Noto's rounded-rectangle bowl.
+# Raw median cardinals (469,350)/(280,674)/(91,350)/(280,27) nudged ~2 outward to
+# right(471,350) top(280,670) left(89,350) bottom(280,31) so the 84-stroke lands on
+# Noto; handles ~k0.55-0.62 flatten the sides/sharpen the corners. Verified overlay:
+# OURS 466x723 W/H0.64 x[47..513] y[-11..712] vs NOTO 466x720 W/H0.65 x[48..513].
+M 471 350
+C 471 543 391 670 280 670
+C 169 670 89 543 89 350
+C 89 157 169 31 280 31
+C 391 31 471 157 471 350
+Z

@@ -1,0 +1,29 @@
+# W — U+0057 capital double-u. OUR OWN uniform-width stroked centerline (stroke 84),
+# reconstructed onto Noto's W skeleton on the grid (NOT a copy of Noto's curve data).
+# Units: 1000 UPEM, y-up, baseline 0, cap 700.
+#
+# Reverse-engineered Noto's W outline (normalized to our grid): FOUR straight diagonal
+# strokes = two joined V's (\/\/), drawn as ONE continuous median polyline through five
+# vertices, exactly like lowercase 'w'. Took the MEDIAN (centre) of each stroke so
+# stroking at 84 lands ours on Noto's edges:
+#   - top terminal centres: left x54 (outer 12 / inner 104), right x857 (outer 899 /
+#     inner 807); both flat-cut at the cap -> centre y689 (butt cap rises ~11 to 700).
+#   - centre peak centre x452 (Noto flat top 407..498, inner wedge apex 452,597);
+#     round join at the up-peak -> vertex y664 lands the dome on the cap 700 while the
+#     inner white wedge opens to match Noto.
+#   - two bottom V-tips: left centre x241 (flat 197..286), right x668 (flat 624..713);
+#     round join at the down-V drops ~42 -> vertices raised to y38 so tips land ~baseline.
+# Verified by overlay: ours (blue) tracks Noto (red) as near-solid purple at uniform 84;
+# bbox x[12..899] matches Noto exactly. Only the flat-horizontal terminal/peak corners
+# differ slightly (a single round-join/butt-cap can't be perfectly flat) — same trade-off
+# as the V / w / A models.
+# Replaces the old thick/thin-contrast 'W' with the uniform one-brush style of S/C/G/J
+# and the lowercase. Advance = Noto. stroke 84.
+advance 910
+stroke 84
+# left terminal -> left V-tip -> centre peak -> right V-tip -> right terminal (one stroke)
+M 54 689
+L 241 38
+L 452 664
+L 668 38
+L 857 689

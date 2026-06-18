@@ -1,0 +1,10 @@
+# x — U+0078. Stroked centerline; two diagonal arms crossing at the x-height centre.
+# Slope matched to Noto so the long edges sit on its outline: \ top-cap-mid (76,525) to
+# bottom-cap-mid (452,0); / bottom (66,0) to top (442,525). The arms cross at (259,269),
+# Noto's optical centre; endpoints sit exactly on x-height/baseline. stroke 84.
+advance 518
+stroke 84
+M 76 525
+L 452 0
+M 66 0
+L 442 525

@@ -1,0 +1,17 @@
+# q — U+0071 lowercase. Reconstructed stroked CENTERLINE (our own uniform-width outline
+# on Noto's gridpoints, NOT a copy of Noto's curve data). Round bowl on the left merging
+# into a straight stem on the right that descends below the baseline.
+# Noto skeleton in our grid units (median of outer/inner edges):
+#   bowl outer x54..434 y-10..535, inner x143..434 y62..464  ->  median ellipse
+#     cx287 cy262 rx189 ry237 (left 98.5, top 499.5, bottom 26; right vertex = stem ctr).
+#   stem ctr x=476 (Noto outer 520 / inner 433); flat top y525, descender foot y-235.
+#   Endpoints inset 42 (half stroke) so caps land on Noto's flat top/foot: 483 .. -193.
+# The ellipse right vertex (cx+rx=476) sits on the stem centreline, so bowl + stem merge
+# into one solid uniform stroke. stroke 84.
+advance 602
+stroke 84
+# round bowl on the median ellipse (right vertex cx+rx=476 sits on the stem centreline)
+ellipse 286 262 190 238
+# straight stem at x=476: flat top down through the descender foot
+M 476 525
+L 476 -235

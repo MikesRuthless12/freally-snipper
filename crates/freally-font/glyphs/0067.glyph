@@ -1,0 +1,11 @@
+# g — U+0067. Single-story, stroked centerline. Bowl on the MEDIAN ellipse (midway
+# between Noto outer x54.. y-10..535 and inner x143..435 y61..463). Stem centre x=477
+# (outer 520 / inner 435). Descender hook traces the median tail down to ~y-200 and out
+# to a left terminal. Uniform stroke 84 lands ours on Noto's outline. stroke 84.
+advance 602
+stroke 84
+ellipse 288 262 190 237
+M 477 518
+L 477 -14
+C 477 -112 404 -204 284 -204
+C 206 -204 150 -202 114 -180

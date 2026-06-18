@@ -1,0 +1,17 @@
+# K — U+004B capital kay. OUR OWN uniform-width stroked centerline (stroke 84),
+# reconstructed onto Noto's measured 'K' shape (NOT a copy of Noto's curve data).
+# Stem median x139, y0..700. Arm + leg terminals lowered/raised so the perpendicular
+# stroke caps DON'T poke past the cap line (700) or baseline (0) — same top/foot as the
+# rest. Three stroked subpaths union into one solid K. stroke 84. Advance = Noto's 606.
+advance 606
+stroke 84
+# vertical stem (median x139), full height
+M 139 0
+L 139 700
+# upper ARM: stem -> elbow -> up to the top terminal (capped at 700, not past)
+M 139 300
+L 267 392
+L 519 672
+# lower LEG: elbow -> down-right to the foot terminal (capped at baseline 0, not past)
+M 267 392
+L 537 25

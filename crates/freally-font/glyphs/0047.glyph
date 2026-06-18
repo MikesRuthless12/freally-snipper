@@ -1,0 +1,23 @@
+# G — U+0047. Stroked centerline (our own uniform-width outline reconstructed on
+# Noto's gridpoints, NOT a copy of Noto's curve data). One open bowl arc (C-ring)
+# from the top-right terminal, over the top, down the left, around the bottom, up
+# to the bottom-right shoulder; then UP the short spur and IN along the crossbar to
+# the mouth — leaving the aperture OPEN at upper-right. stroke 84.
+# Median ellipse cx=410 cy=350 rx=304 ry=321 (midway between Noto outer/inner).
+# Spur centre x=597 (Noto outer face 641 - 42). Crossbar centre y=330; the butt cap
+# lands the inner mouth lip on Noto's x=399.
+advance 770
+stroke 84
+# top-right terminal (the lip above the mouth, ~1 o'clock)
+M 615 631
+# over the top to the apex, then down the left side
+C 542 648 477 671 410 671
+C 242 671 106 527 106 350
+# left side down to the bottom apex (slight lower-left bulge to track Noto)
+C 100 150 232 29 410 29
+# bottom round up to the bottom-right shoulder, curving into the spur foot
+C 478 29 556 33 597 62
+# UP the spur (outer face on Noto's x=641) to the crossbar level
+L 597 330
+# IN along the crossbar to the mouth tip (butt cap lands the inner lip on x=399)
+L 399 330

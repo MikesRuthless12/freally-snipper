@@ -1,0 +1,15 @@
+# f — U+0066. Stroked centerline reconstructed on Noto's gridpoints (our own outline,
+# uniform brush). Vertical stem centre x=150 (Noto stem 107..193). Crossbar centre y=492
+# (Noto bar 459..525) spanning x=15..325. Hook from stem top curls up-over-right to a
+# terminal at the ascender (Noto outer top y750 / inner y679; terminal ~368,698). stroke 84.
+advance 337
+stroke 84
+# vertical stem (bottom up to where the hook begins)
+M 150 0
+L 150 575
+# hook: straight up a touch, curl up-left and over the top, then out to the terminal
+C 150 663 183 721 276 721
+C 314 721 349 712 366 705
+# crossbar across the stem at the x-height band
+M 15 492
+L 325 492

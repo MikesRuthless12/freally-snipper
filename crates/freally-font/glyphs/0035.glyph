@@ -1,0 +1,14 @@
+# 5 — U+0035. Top arm + neck + backwards-c bowl with a FLAT shoulder at the top (the bowl
+# comes back to the spine with a flat horizontal part/notch), and a FLAT vertical terminal
+# at the lower-left (arrives horizontal at 62,69), both like Noto's 5. One path. stroke 84.
+advance 561
+stroke 84
+M 456 661
+L 150 661
+L 158 432
+L 270 432
+C 388 432 461 362 461 250
+C 461 156 440 102 402 66
+C 360 38 300 30 243 30
+C 188 30 140 40 110 52
+C 92 60 80 69 62 69

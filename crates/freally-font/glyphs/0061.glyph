@@ -1,0 +1,18 @@
+# a — U+0061 lowercase double-storey ay. Reconstructed stroked centerline (NOT Noto curve
+# data) on Noto's gridpoints. Right stem center x=428 (Noto outer 471 - 42), runs baseline 0
+# up into a long arch that sweeps over the top and DOWN the left to a terminal at ~(135,462)
+# (Noto's arch rounded end x~103..129). Lower bowl = open median ellipse (Noto median center
+# 237,156 rx147 ry130) traced CCW, left open on the right where the stem is the bowl wall. stroke 84.
+advance 549
+stroke 84
+# --- stem + arch (one open path: up the right side, over the top, down to the left terminal) ---
+M 428 0
+L 428 330
+C 428 422 406 466 362 482
+C 304 498 192 494 128 470
+# --- lower bowl: open median ellipse, CCW from upper-right junction to lower-right junction ---
+M 424 248
+C 352 282 286 288 237 288
+C 154 288 88 228 88 150
+C 88 84 154 26 237 26
+C 304 26 374 66 424 118

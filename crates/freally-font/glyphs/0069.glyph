@@ -1,0 +1,12 @@
+# i — U+0069. Stroked centerline. Noto's stem outer x83..170 y0..525 -> vertical
+# median line at x=126.5 (centre, ~42 inside each edge), baseline to x-height.
+# Dot: Noto outer x76..177 y613..723, centre (126.5,668). A stroked ellipse renders
+# a hollow ring, so the dot is 4 short median spokes (V + H + two diagonals) crossing
+# the centre; stroked at 84 they union into a solid octagon filling Noto's disc.
+# Uniform stroke 84 (one brush). advance matches Noto (253).
+advance 253
+stroke 84
+M 126.5 0
+L 126.5 525
+# dot: a SOLID filled disc (radius 52 ~ Noto's tittle), filled regardless of the stroke
+disc 126.5 668 52

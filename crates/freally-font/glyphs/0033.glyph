@@ -1,0 +1,29 @@
+# 3 — U+0033 three. OUR OWN uniform-width stroked centerline (stroke 84), rebuilt to
+# match the new ONE-brush style of S, C, G, J and all lowercase. NOT a copy of Noto's
+# curve data: we reverse-engineered Noto's '3' outline, took the MEDIAN line midway
+# between its outer and inner edges, and fit OUR cubics through it so stroking at 84
+# lands ours on Noto's outline.
+#
+# Skeleton (our units, cap=700, y-up): a top open median C-arc + a bottom open median
+# C-arc, joined by a short central arm. Multiple stroked subpaths UNION into one solid.
+#   top-left terminal ~(70,607); top crown/apex ~(265,673); upper shoulder ~(395,635);
+#   upper-bowl right widest ~(440,533); central arm ~y361 from x193 to the waist ~x305;
+#   lower-bowl right widest ~(460,200); bottom lowest ~(236,26); bottom-left terminal
+#   ~(86,68). Advance = Noto (560).
+advance 560
+stroke 84
+# --- top half: terminal -> over the crown/apex -> right shoulder -> in to the waist ---
+M 70 607
+C 104 645 158 673 230 673
+C 296 673 360 657 405 619
+C 437 591 440 560 440 533
+C 440 470 392 388 305 361
+# --- central arm: a short horizontal bar reaching left to its blunt tip ---
+M 305 361
+L 178 361
+# --- bottom half: waist -> out around the wider lower bowl -> bottom -> terminal ---
+M 305 361
+C 392 350 460 268 460 200
+C 460 134 414 66 332 46
+C 301 38 268 30 236 30
+C 182 30 120 38 76 56

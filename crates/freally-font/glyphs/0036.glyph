@@ -1,0 +1,10 @@
+# 6 — U+0036 six. Exactly the 9 rotated 180 degrees about the glyph centre (280,350):
+# every point (x,y) -> (560-x, 700-y). Bowl in the BOTTOM half + a stroke sweeping up to
+# the top-right. Uniform stroke 84 (identical brush to the 9).
+advance 560
+stroke 84
+ellipse 281 216 190 192
+M 92 220
+C 93 300 96 370 101 420
+C 108 495 120 535 148 576
+C 202 652 328 674 424 674

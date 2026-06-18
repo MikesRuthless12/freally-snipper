@@ -1,0 +1,21 @@
+# U — U+0055 capital you. OUR OWN uniform-width stroked centerline (stroke 84),
+# reconstructed to sit on Noto's shape on the grid (NOT a copy of Noto's curve data).
+# We reverse-engineered Noto's outline, took the MEDIAN line midway between its outer
+# and inner edges: two straight stems at median x=132 (left) and x=584 (right) drop
+# from the cap line (700) to y~247, then a symmetric U-bowl turn through the bottom
+# centre (~358, 32) that overshoots the baseline. Median bowl cubics derived by
+# averaging Noto's outer & inner handles. Stroking 84 lands ours on Noto's outline.
+# Advance = Noto (716).
+advance 716
+stroke 84
+# left stem, cap line down to the bowl spring
+M 132 700
+L 132 247
+# bowl: left spring -> down -> bottom centre (centre y=32 so stroke outer lands at Noto's -10)
+C 132 180 151 127 189 88
+C 227 50 284 32 358 32
+# bowl: bottom centre -> up -> right spring
+C 432 32 489 50 527 88
+C 565 127 584 180 584 247
+# right stem, up to the cap line
+L 584 700

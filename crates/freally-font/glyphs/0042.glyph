@@ -1,0 +1,18 @@
+# B — U+0042. Stem + two R-STYLE bowls (flat top/bottom bars + a rounded right flank,
+# matching the R's curvature) stacked — the R's bowl shape, twice. Uniform stroke 84.
+advance 636
+stroke 84
+M 139 0
+L 139 700
+# upper bowl: top bar -> rounded right -> bottom bar back to the stem at the waist
+M 139 660
+L 300 660
+C 412 660 502 592 500 514
+C 498 448 452 410 372 388
+L 139 386
+# lower bowl (a touch larger): waist top bar -> rounded right -> bottom bar near the foot
+M 139 348
+L 312 348
+C 426 348 528 276 526 196
+C 524 116 458 66 372 44
+L 139 44

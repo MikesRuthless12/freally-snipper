@@ -1,0 +1,20 @@
+# m — U+006D. Stroked centerline (uniform brush 84) — our own outline on Noto's
+# gridpoints, not a copy of Noto's curve data. Same arch family as 'n': the LEFT stem
+# carries the flat-top entry (curve starts vertical), while the middle & right stems are
+# rounded by the arches (no flat tops). Stem centres x=127/460/794 (Noto 83/170,
+# 418/503, 752/837); arch apex y~493 (outer 535 / inner 463); curved junctions ~360.
+# Renderer uses BUTT caps -> stem feet at y=0 land on Noto's foot. stroke 84.
+advance 915
+stroke 84
+# A: left stem (flat-top entry) + arch 1 + middle stem down to the foot
+M 127 0
+L 127 525
+M 127 405
+C 190 448 256 493 320 493
+C 400 493 460 462 460 360
+L 460 0
+# B: arch 2 springs (rounded) off the middle stem + right stem down to the foot
+M 460 360
+C 508 442 566 493 632 493
+C 714 493 794 455 794 360
+L 794 0

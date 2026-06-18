@@ -1,0 +1,10 @@
+# z — U+007A. Stroked centerline Z: top bar, diagonal, bottom bar — one open
+# polyline on the MEDIAN of Noto's strokes. Top bar y-centre 483 (top hits x-height
+# 525), bottom bar y-centre 42 (bottom hits baseline 0). Diagonal centre runs
+# (385,483)->(73,42), midway between Noto's two diagonal edges. stroke 84.
+advance 460
+stroke 84
+M 55 483
+L 385 483
+L 73 42
+L 423 42

@@ -1,0 +1,22 @@
+# V — U+0056 capital vee. OUR OWN uniform-width stroked centerline (stroke 84),
+# reconstructed to sit on Noto's shape on the grid (NOT a copy of Noto's data).
+# Replaces the old thick/thin-contrast 'V' with the one-brush uniform style of
+# S/C/G/A and the lowercase. V is an inverted A without a crossbar: two diagonal
+# median lines meeting at a blunt bottom vertex.
+#
+# Reverse-engineered Noto outline (our grid, cap=700): left arm outer (0,700)->(250,0),
+# inner top (92,700) -> inner notch ~(294,98); right arm mirror. MEDIAN (centre of
+# each 84 brush, ~42 inside the outer edge at this ~20deg slant => ~45 horiz):
+#   left arm top centre ~ (44,700), right arm top centre ~ (544,700),
+#   bottom vertex centre ~ (294,32) (blunt bottom overshoots baseline ~-10).
+advance 587
+
+# Bottom vertex: the two arms meet at a single point on the symmetry axis. The fixed
+# round line-join blunts it automatically (never a razor point, matching Noto's blunt
+# bottom + the W/V house style); centre ~y32 lands the stroked tip ~-10 (overshoot).
+# left diagonal arm: top -> bottom vertex
+M 44 700
+L 294 32
+# right diagonal arm: bottom vertex -> top (overlaps at vertex; union is fine)
+L 544 700
+stroke 84

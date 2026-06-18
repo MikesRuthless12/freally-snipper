@@ -1,0 +1,13 @@
+# l — U+006C lowercase ell. Stroked centerline (uniform brush, stroke 84) — our own
+# outline reconstructed on Noto's gridpoints, not a copy of Noto's curve data.
+# Noto 'l' is a plain vertical bar: outer x 83..170 (≈84 wide), y 0..745, advance 253.
+# Skeleton = the stem centre: x=126.5, baseline 0 -> ascender 745. Stroking the
+# centerline at 84 lands ours (84.5..168.5) on Noto's outer edge (83..170). No serifs,
+# flat top/foot (not a round letter, so no overshoot).
+advance 253
+stroke 84
+# vertical stem centreline, centred at x=126.5. Endpoints inset by half the stroke
+# (42) so the round stroke cap lands ON Noto's flat foot (0) and top (745):
+# bottom 0+42=42, top 745-42=703.
+M 126.5 0
+L 126.5 745

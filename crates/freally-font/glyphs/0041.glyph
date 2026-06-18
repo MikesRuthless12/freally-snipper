@@ -1,0 +1,17 @@
+# A — U+0041 capital ay. OUR OWN uniform-width stroked centerline (stroke 84),
+# reconstructed to sit on Noto's shape on the grid (NOT a copy of Noto's data).
+# We reverse-engineered Noto's outline, took the MEDIAN line at the centre of each
+# stroke: apex centre ~ (314,663) (peak lands on cap ~705), feet centres left ~ (40,10)
+# / right ~ (585,10), crossbar centre y ~ 256 spanning between the two leg centrelines.
+# The two legs are ONE continuous path so the apex is a single clean point (no notch).
+# Replaces the old thick/thin-contrast 'A' with the uniform one-brush style of
+# S/C/G/J and the lowercase. Advance = Noto.
+advance 626
+stroke 84
+# left foot -> apex -> right foot (one stroke; mitred apex)
+M 40 10
+L 314 663
+L 585 10
+# crossbar: across both legs at y=256 (overlaps both legs; union is fine)
+M 137 256
+L 489 256

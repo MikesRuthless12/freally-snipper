@@ -1775,6 +1775,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "freally-font"
+version = "0.45.0"
+dependencies = [
+ "ab_glyph",
+ "tiny-skia",
+]
+
+[[package]]
 name = "freally-snipper"
 version = "0.45.0"
 dependencies = [
@@ -5302,6 +5310,7 @@ dependencies = [
  "bytemuck",
  "cfg-if",
  "log",
+ "png 0.17.16",
  "tiny-skia-path",
 ]
 

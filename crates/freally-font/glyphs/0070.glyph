@@ -1,0 +1,16 @@
+# p — U+0070. Reconstructed stroked centerline (our own outline on Noto's gridpoints,
+# never a copy of Noto's curve data). A descending vertical stem + a round bowl.
+#   Noto outer bowl x..549 top 535 bottom -10; inner counter x170..460 y62..463.
+#   Median bowl ellipse = midway between outer & inner (cx315 cy262 rx~189 ry~236), whose
+#   left edge lands on the stem centre so the two strokes merge cleanly.
+#   Stem: outer x83..170 (ctr x126.5), y -235 (descender) .. 525 (x-height); centre
+#   endpoints inset by half the brush (42) so the round caps land on Noto's foot/top.
+# One uniform brush, stroke 84.
+advance 602
+stroke 84
+# descending stem centreline (x=126.5): bottom -235+42=-193, top 525-42=483
+M 126.5 -235
+L 126.5 525
+# round bowl on the median ellipse (left edge ~123 merges into the stem); rx/ry biased
+# onto Noto's overlay (right flank out to 549, top eased to 535) like the finished 'o'.
+ellipse 315 262 192 231

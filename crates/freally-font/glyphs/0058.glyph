@@ -1,0 +1,16 @@
+# X — U+0058 capital ex. OUR OWN uniform-width stroked centerline (stroke 84),
+# reconstructed onto Noto's shape on the grid (NOT a copy of Noto's curve data).
+# We reverse-engineered Noto's outline, then took the MEDIAN line of each diagonal
+# (midway between its outer & inner edges) so stroking at 84 lands ours on Noto's
+# outline. Two straight diagonals cross near (286,350); overlap at the node is fine
+# and unions into one solid X. Endpoints sit ~10u in along each diagonal from the
+# foot/arm centres so the 84 butt-cap straddles Noto's flat square tips with only a
+# slight overshoot. Units: 1000 UPEM, y-up, baseline 0, CAP 700. Advance = Noto (574).
+advance 574
+stroke 84
+# '\' diagonal (top-left arm -> bottom-right foot)
+M 73 692
+L 516 8
+# '/' diagonal (bottom-left foot -> top-right arm)
+M 56 8
+L 501 692

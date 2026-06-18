@@ -1,0 +1,16 @@
+[package]
+name = "freally-font"
+description = "freally-font — Freally's own original typeface (glyph outlines + specimen renderer)."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish = false
+
+[dependencies]
+# Pure-Rust 2D rasterizer (BSD-3) — fills our *own* glyph outlines to a PNG specimen
+# for the design/refine loop. A rendering tool, not a font: no third-party glyphs.
+tiny-skia = "0.11"
+# Rasterizes the *reference* font (Noto Sans) for side-by-side calibration only —
+# a measuring stick for proportions, never a source of our glyph shapes.
+ab_glyph = "0.2"

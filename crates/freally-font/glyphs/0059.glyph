@@ -1,0 +1,19 @@
+# Y — U+0059 capital wye. OUR OWN uniform-width stroked centerline (stroke 84),
+# reconstructed on Noto's 'Y' shape on the grid (NOT a copy of Noto's curve data).
+# We reverse-engineered Noto's outline and took the MEDIAN (centre) line of each
+# stroke: left-arm top centre ~(48,700), right-arm top centre ~(507,700) [Noto arm
+# tops span x0..96 and 460..555 at y700], both diagonals meeting the stem axis at
+# ~(277,270); the single vertical stem (centre x~277, Noto stem x233..322) drops
+# from the junction to the baseline 0. Stroking these centre lines at 84 lands ours
+# on Noto's outline. Advance = Noto (554).
+advance 554
+stroke 84
+# left arm: top-left centre -> junction on stem axis
+M 48 700
+L 278 270
+# right arm: top-right centre -> junction on stem axis
+M 508 700
+L 278 270
+# stem: junction -> baseline
+M 278 270
+L 278 0

@@ -1,0 +1,14 @@
+# S — U+0053. Stroked centerline; bowls pushed further OUT in the middle (shoulders 90 /
+# 450, span ~360) and biased onto Noto's overlay (lower shoulder ~448-450). Terminals kept
+# symmetric + matched (lead-ins mirror, monotonic into each end). stroke 84.
+advance 540
+stroke 84
+M 461 633
+L 434 642
+C 392 662 338 671 281 671
+C 196 671 90 618 90 526
+C 90 456 196 404 268 356
+C 340 305 450 254 450 184
+C 450 88 348 28 244 28
+C 168 28 108 50 78 58
+L 51 67

@@ -1,0 +1,24 @@
+# C — U+0043 capital cee. OUR OWN uniform-width stroked centerline (stroke 84),
+# reconstructed to sit on Noto's open-bowl shape on the grid (NOT a copy of Noto's
+# curve data). We reverse-engineered Noto's outline, took the MEDIAN line midway
+# between its outer and inner edges (bowl centre ~ (390,350); leftmost median x~105
+# at y~355; top arch median ~671, bottom arch ~29; humanist terminals flare OUT to
+# ~ (566,628) top-right and ~ (558,60) bottom-right), then fit OUR cubics through it
+# with a small outward bias at the diagonal shoulders so stroking 84 lands on Noto's
+# outline. The right aperture is left OPEN (~60% of cap, like Noto). Advance = Noto.
+advance 619
+stroke 84
+# top-right terminal (flared out, ~1-2 o'clock)
+M 566 628
+# in to the top arch peak (thin top)
+C 532 659 464 667 413 671
+# top -> upper-left shoulder
+C 337 674 249 667 196 606
+# upper-left -> left side (leftmost ~y355)
+C 134 538 114 444 101 355
+# left side -> lower-left shoulder
+C 101 272 112 178 176 118
+# lower-left -> bottom arch valley (thin bottom)
+C 235 59 321 35 403 29
+# bottom arch -> bottom-right terminal (flared out, ~4-5 o'clock)
+C 454 34 516 38 558 60

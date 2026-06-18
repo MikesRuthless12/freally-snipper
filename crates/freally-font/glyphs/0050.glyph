@@ -1,0 +1,21 @@
+# P — U+0050 capital pee. OUR OWN uniform-width stroked centreline (stroke 84),
+# reconstructed on Noto's gridpoints (NOT a copy of Noto's curve data). We reverse-
+# engineered Noto's outline, took the MEDIAN line midway between its outer & inner
+# edges, then placed OUR centrelines so stroking 84 lands ours on Noto's outline.
+#   Noto stem: outer x95..183 (centre x139), full cap y0..700.
+#   Noto bowl outer: right flank to x543, top y700, bottom y273.
+#   Noto bowl inner (counter): right to x452, top y625, bottom y348.
+#   Median bowl ellipse = midway between outer & inner: cx320 cy486 rx181 ry172, whose
+#   left edge (139) lands on the stem centre so the two strokes merge cleanly. Matches
+#   the uniform-stroke style of S, C, o and lowercase p. Advance = Noto (592).
+advance 592
+stroke 84
+# vertical stem centreline (x=139): foot 0+42=42, top 700-42=658 (round caps land on Noto)
+M 139 0
+L 139 700
+# bowl = a horseshoe: from the stem near the top, across + down the right, back to the stem
+M 139 658
+L 316 658
+C 430 658 516 582 514 488
+C 512 398 458 348 360 316
+L 139 314

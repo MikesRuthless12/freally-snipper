@@ -1,0 +1,17 @@
+# Z — U+005A capital zed. OUR OWN uniform-width stroked centerline (stroke 84),
+# reconstructed to sit on Noto's 'Z' shape on the grid (NOT a copy of Noto's curve
+# data). We reverse-engineered Noto's outline in our grid units, took the MEDIAN line
+# of each stroke (midway between its outer & inner edges), then drew OUR centre lines:
+#   top arm median y~661, bottom arm median y~33; diagonal centre runs (459,627)->(90,72)
+# and is EXTENDED to meet the two arm centrelines (top ~x482, bottom ~x65) so the
+# corners fill. Terminals pulled 42 inside Noto's outer edge so stroking 84 lands on
+# Noto's outline. Matches the uniform-stroke S/C/G/J + lowercase. Advance = Noto (560).
+advance 560
+stroke 84
+# top arm: left terminal -> top-right corner (junction with diagonal)
+M 89 661
+L 479 659
+# diagonal: top-right -> bottom-left corner (junction with bottom arm)
+L 67 36
+# bottom arm: bottom-left corner -> right terminal
+L 484 34

@@ -1,0 +1,13 @@
+# j — U+006A. Stroked centerline (sibling of 'i'): same dot + stem, plus a J-tail.
+# Noto stem outer x83..170 -> vertical median at x=126.5 (~42 inside each edge),
+# flat top at x-height 525 (butt cap) down into the descender. Tail: Noto outer
+# bottom y-235 + left terminal x-54 -> centre bottoms ~y-193, ends horizontal at
+# (-12,-193) so the butt cap stands vertical like Noto's terminal. Dot: median
+# ellipse over Noto's tittle (cx126.5 cy668 rx8.5 ry13). Uniform stroke 84;
+# advance 253 matches Noto.
+advance 253
+stroke 84
+M 126.5 525
+L 126.5 -62
+C 126.5 -160 45 -193 -12 -193
+disc 126.5 668 52
