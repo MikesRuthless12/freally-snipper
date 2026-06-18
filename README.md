@@ -144,6 +144,7 @@ Publish it via **Settings → Pages → Deploy from a branch → `main` / `docs`
 ├── crates/
 │   ├── capture/         # `freally-capture` — screen capture           (Phase 1)
 │   ├── editor/          # `freally-editor`  — image editor             (Phase 4)
+│   ├── freally-font/    # `freally-font`    — Freally's own typeface (English; in progress) (Phase 4b)
 │   ├── asr/             # `freally-asr`     — optional local speech-to-text (Phase 6)
 │   └── video/           # `freally-video`   — owned video codec + editor   (Phase 5/6)
 └── .github/workflows/ci.yml

@@ -1,0 +1,13 @@
+# L — U+004C capital ell. OUR OWN uniform-width stroked centerline (stroke 84),
+# reconstructed to sit on Noto's shape on the grid (NOT a copy of Noto's data).
+# We reverse-engineered Noto's outline (stem x95..183, foot y0..78 out to x489)
+# and took the MEDIAN centre of each stroke: vertical stem centre x=139 (midway
+# 95..183), foot bar centre y=39 (midway 0..78), foot right end x=447 (489-42),
+# stem top y=658 (700-42, flat cap terminal). Stroking 84 lands ours on Noto's
+# outline. One L-shaped polyline: stem down, then foot out. Advance = Noto's 513.
+advance 513
+stroke 84
+# stem top (flat, on cap line) -> down to the foot corner -> out along the foot
+M 139 700
+L 139 42
+L 447 42

@@ -1,0 +1,16 @@
+# J — U+004A. Reconstructed stroked CENTERLINE (our own outline), uniform width 84.
+# Units: 1000 UPEM, y-up, baseline 0. CAP 700, descender to ~-186 (Noto's J foot).
+# Noto skeleton (median of outer/inner edges, in our grid units):
+#   stem centre x=134 (Noto outer 178 / inner 90), held vertical from cap to y~7
+#   hook median: (134,7) -> (84,-118) -> bottom (-5,-147) -> terminal (-76,-136)
+#   terminal = blunt butt cap at left flank x~-76 (Noto flank -76, y -99..-174)
+# We trace only the centre line; stroke 84 reconstructs the outline on Noto's gridpoints.
+advance 268
+stroke 84
+# top of stem down to where the hook begins
+M 134 700
+L 134 4
+# hook: leave the stem vertical, sweep down-left to the bottom of the curl, then run
+# left along the bottom to the blunt terminal cap (arrives horizontal -> clean butt cap)
+C 134 -72 100 -145 30 -143
+C -16 -141 -54 -138 -74 -138

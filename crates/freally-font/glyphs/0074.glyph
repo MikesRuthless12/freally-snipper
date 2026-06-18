@@ -1,0 +1,22 @@
+# t — U+0074. Stroked centerline (uniform brush, stroke 84) — our own outline
+# reconstructed on Noto's gridpoints, not a copy of Noto's curve data.
+# Noto 't' (our grid, cap=700): stem outer x90..176 (centre 133), top y=646;
+# crossbar top y=525 / bottom y=459 (centre 492), tips x=16..328; tail hooks down-
+# right from the stem to a terminal whose outer tip is x~332, y-centre ~39.
+# Skeleton (medians, midway between Noto's outer & inner edges): vertical stem
+# centreline x=133 from the top down into a tail curve that bottoms ~y27 then rises
+# to the terminal ~ (328,40); horizontal crossbar centreline at y=492, full width.
+# Butt caps: each free endpoint sits ON Noto's edge (no inset). Stroke 84 lands ours
+# on Noto's outline end to end.
+advance 353
+stroke 84
+# stem + tail: down the stem centre (x=133), then curve right into the hooked tail;
+# the final control sits at the terminal height (y=39) so the tail arrives flat and
+# the butt cap stands vertical, matching Noto's vertical terminal edge at x~332.
+M 133 646
+L 133 150
+C 133 86 158 50 213 33
+C 252 26 308 40 335 40
+# crossbar: horizontal centreline at y=492, left tip x=16 to right tip x=328
+M 16 492
+L 328 492

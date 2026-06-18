@@ -1,0 +1,21 @@
+# 9 — U+0039 nine. OUR OWN uniform-width stroked centerline (stroke 84), reconstructed
+# to sit on Noto's '9' on the grid (NOT a copy of Noto's curve data). The 180° sibling
+# of 6: a round bowl in the TOP half (closed ring on the MEDIAN ellipse, counter appears
+# automatically inside the stroke) whose RIGHT shoulder flows DOWN into a tail that sweeps
+# down-and-LEFT to a slim terminal near the baseline at the lower-left. We reverse-
+# engineered Noto's outline and took the MEDIAN line midway between its outer & inner
+# edges: bowl centre ~(279,483) rx~187 ry~190 (top med ~673, left med ~91, right med
+# ~466, bottom med ~292); tail median x~464@y340, 459@300, 454@250, 436@200, 417@150,
+# flaring left into the terminal ~(150,30). stroke 84 lands ours on Noto's outline.
+advance 560
+stroke 84
+
+# Bowl ring (top half) on the median ellipse; counter cut automatically by the stroke.
+ellipse 279 484 190 192
+
+# Tail: from the bowl's right shoulder DOWN the right side, then sweeping left into the
+# slim lower-left terminal. Overlaps the bowl ring near the top (union is fine).
+M 468 480
+C 467 400 464 330 459 280
+C 452 205 440 165 412 124
+C 358 48 232 26 136 26

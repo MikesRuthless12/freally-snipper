@@ -1,0 +1,27 @@
+# 2 — U+0032 two. OUR OWN uniform-width stroked centerline (stroke 84), reconstructed
+# to sit on Noto's '2' shape on the grid (NOT a copy of Noto's curve data). We reverse-
+# engineered Noto's outline, took the MEDIAN line midway between its outer & inner edges
+# for each stroke: lower-left terminal median ~(78,598); crown peak median ~(270,673)
+# (outer 710 / inner 636); bowl right-max median ~(437,521) (outer 481 / inner 393);
+# diagonal median running ~(266,241)->(108,78); flat base bar centre y~39 spanning the
+# full width (x47..510). Open crown/bowl = median C arcs; base bar = a straight median
+# line. Stroking 84 lands ours on Noto's outline; the two subpaths union into one shape.
+# Advance = Noto (560).
+advance 560
+stroke 84
+
+# upper stroke: lower-left terminal -> over the crown -> bowl -> diagonal -> down to base
+M 80 596
+# crown: terminal up and over the top to the peak
+C 135 640 188 670 272 670
+# right shoulder of the crown down to the bowl's rightmost point (median ~443,521)
+C 376 670 444 598 444 521
+# bowl + diagonal sweeping down-left through medians (417,427)->(356,339)
+C 438 458 396 388 356 339
+# diagonal mid -> upper diagonal (median ~282,259)
+C 330 305 300 278 282 259
+# diagonal curves smoothly DOWN and rounds INTO the base bar (no angle/notch), then the
+# base bar continues across to the right — one continuous stroke
+C 224 182 122 100 84 72
+C 58 50 60 40 108 40
+L 510 40

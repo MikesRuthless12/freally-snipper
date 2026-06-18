@@ -6,6 +6,11 @@ All notable changes to Freally Snipper are documented here. The format is based 
 
 ## [Unreleased]
 
+Work begins on **freally-font** — Freally's own original typeface, which will eventually replace the bundled fonts.
+
+### Added
+- **freally-font** (new `crates/freally-font`) — the full **English** set (A–Z, a–z, 0–9) as 100%-original uniform-stroke glyphs, data-driven (one `.glyph` file per codepoint) with a specimen / overlay / metrics renderer for design calibration; proprietary, built from original outlines (no third-party glyph data).
+
 ## [0.45.0] — 2026-06-17 — Image editor (Toolbar 2)
 
 A full WYSIWYG image editor — markup, text, shapes, emoji, filters, transforms, image-on-image, OCR, and on-device translation — plus start-at-login and an in-app model downloader.

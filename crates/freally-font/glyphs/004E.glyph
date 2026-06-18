@@ -1,0 +1,28 @@
+# N — U+004E capital en. OUR OWN uniform-width stroked centerline (stroke 84),
+# reconstructed onto Noto's measured 'N' shape on the grid (NOT a copy of Noto's
+# curve data). We reverse-engineered Noto's outline in our grid units and took the
+# MEDIAN line down the centre of each stroke (midway between its outer & inner edges),
+# so stroking 84 lands ours on Noto's outline. Matches the uniform style of S/C/G/J.
+#
+# Noto medians (cap 700, y-up):
+#   left  stem: outer x95  inner x176  -> centre x 135
+#   right stem: inner x568 outer x650  -> centre x 609
+#   diagonal centre line  x = 598 - 0.645*y  (top end ~147 @ y700, foot ~598 @ y0)
+#
+# Three stroked subpaths UNION into one solid N; the stem/diagonal overlaps at the
+# apex and foot are fine and fill the corners automatically.
+advance 744
+stroke 84
+# left stem
+M 135 0
+L 135 700
+# right stem
+M 609 0
+L 609 700
+# diagonal on Noto's centre line (slope -0.644). Endpoints tucked in by ~half a
+# cap-projection (~23u) so the perpendicular butt caps land ON the cap line / baseline:
+# no blue poke past y700 / y0, while the upper-right & lower-left cap corners still
+# reach Noto's apex (~197,700) and foot (~547,0). Flat-capped stems form the clean
+# top/bottom. Top (162,677), foot (583,23).
+M 162 677
+L 583 23

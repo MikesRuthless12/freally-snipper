@@ -1,0 +1,12 @@
+# c — U+0063. Stroked centerline; open bowl on the MEDIAN arc, midway between Noto's
+# outer (x54..438 y-10..535) and inner (x143..429 y65..460) edges — same bowl as our
+# 'o' (cx297 cy262 rx202 ry231) but OPEN on the right with two flared terminals. The
+# arc runs top-terminal -> over the top -> down the left -> round the bottom ->
+# bottom-terminal; aperture left open. Uniform stroke 84 lands ours on Noto's outline.
+advance 470
+stroke 84
+M 398 462
+C 367 482 332 493 297 493
+C 185 493 95 390 95 262
+C 95 134 185 31 297 31
+C 336 31 374 44 407 68

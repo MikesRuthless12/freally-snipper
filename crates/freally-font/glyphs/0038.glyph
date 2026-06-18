@@ -1,0 +1,14 @@
+# 8 — U+0038 eight. OUR OWN uniform-width stroked centerline (stroke 84), reconstructed
+# to sit on Noto's figure-8 shape on the grid (NOT a copy of Noto's curve data). We
+# reverse-engineered Noto's outline and took the MEDIAN ring (midway between outer & inner
+# edges) of each bowl: upper bowl outer x[71..489]/inner x[155..404] -> median cx280 rx167,
+# top y675 waist y386 -> cy530 ry145; lower bowl outer x[48..512]/inner x[132..427] ->
+# median cx280 rx190, bottom y25 waist y346 -> cy185 ry160. The two stroked ellipses UNION
+# at the waist into one solid 8 and the counters (holes) appear inside each ring. Lower bowl
+# is wider/taller than upper (Noto-true). Advance = Noto's normalized 560.
+advance 560
+stroke 84
+# upper bowl (median ring)
+ellipse 280 527 167 142
+# lower bowl (median ring) — wider & taller
+ellipse 280 189 190 156

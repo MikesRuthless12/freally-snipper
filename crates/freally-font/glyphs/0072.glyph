@@ -1,0 +1,12 @@
+# r — U+0072. Stroked centerline (uniform brush 84). Left stem + humanist arch that
+# sweeps up and out to a leaning finial terminal (no second stem). Medians midway
+# between Noto's outer/inner edges: stem ctr x126 (outer 83/170), branch y~426, arch
+# top y~485 (outer 535), terminal end ~(348,488) (outer right 390, top 535).
+# x-height 525, baseline 0. stroke 84.
+advance 404
+stroke 84
+M 126 0
+L 126 525
+M 126 405
+C 184 458 244 482 304 485
+C 330 487 340 487 352 490

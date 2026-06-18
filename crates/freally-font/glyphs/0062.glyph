@@ -1,0 +1,13 @@
+# b — U+0062. Stroked centerline, uniform stroke 84. Stem (ascender->baseline) at
+# centre x=125. Bowl is OUR median curve (42 inside Noto's outer x170..549 y-10..534),
+# traced as 4 cubics with fuller RIGHT shoulders to track Noto's squarish bowl. stroke 84.
+advance 602
+stroke 84
+M 125 745
+L 125 0
+M 316 490
+C 445 490 507 419 507 262
+C 507 105 445 32 316 32
+C 211 32 126 135 126 262
+C 126 389 211 490 316 490
+Z

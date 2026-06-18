@@ -29,12 +29,64 @@ pub fn extract_text(
     })
     .map_err(|e| format!("init OCR engine: {e}"))?;
 
-    let source = ocrs::ImageSource::from_bytes(image.as_raw(), (image.width(), image.height()))
-        .map_err(|e| format!("read image: {e}"))?;
+    // Flatten over opaque white (so transparent capture regions can't feed noise to
+    // the recognizer) and hand ocrs 3-channel RGB — its documented input format.
+    let (w, h) = (image.width(), image.height());
+    let mut rgb = Vec::with_capacity(w as usize * h as usize * 3);
+    for px in image.pixels() {
+        let [r, g, b, a] = px.0;
+        let a = a as u32;
+        let over = |c: u8| ((c as u32 * a + 255 * (255 - a)) / 255) as u8;
+        rgb.extend_from_slice(&[over(r), over(g), over(b)]);
+    }
+    let source =
+        ocrs::ImageSource::from_bytes(&rgb, (w, h)).map_err(|e| format!("read image: {e}"))?;
     let input = engine
         .prepare_input(source)
         .map_err(|e| format!("prepare OCR input: {e}"))?;
     engine
         .get_text(&input)
         .map_err(|e| format!("recognize text: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::text::{self, FontFamily};
+    use freally_capture::image::{Rgba, RgbaImage};
+
+    /// Diagnostic: confirm the OCR pipeline (models + rten + decode) reads clean,
+    /// upright black-on-white text. Ignored by default — it needs the OCR models in
+    /// the cache and runs real (slow in debug) inference. Run with:
+    ///   cargo test -p freally-editor --release ocr -- --ignored --nocapture
+    #[test]
+    #[ignore = "needs downloaded OCR models in the cache; slow inference"]
+    fn ocr_reads_clean_rendered_text() {
+        let mut img = RgbaImage::from_pixel(720, 180, Rgba([255, 255, 255, 255]));
+        let stamp = text::render("Hello OCR 12345", 72.0, FontFamily::Sans, [0, 0, 0, 255])
+            .expect("render text");
+        // Composite the black text stamp over the opaque white canvas (src-over).
+        for y in 0..stamp.height().min(img.height() - 40) {
+            for x in 0..stamp.width().min(img.width() - 30) {
+                let s = stamp.get_pixel(x, y).0;
+                let a = s[3] as u32;
+                if a == 0 {
+                    continue;
+                }
+                let d = img.get_pixel(x + 30, y + 40).0;
+                let blend = |s: u8, d: u8| ((s as u32 * a + d as u32 * (255 - a)) / 255) as u8;
+                img.put_pixel(
+                    x + 30,
+                    y + 40,
+                    Rgba([blend(s[0], d[0]), blend(s[1], d[1]), blend(s[2], d[2]), 255]),
+                );
+            }
+        }
+        let out = extract_text(&img, |_, _| {}).expect("ocr run");
+        eprintln!("OCR OUTPUT: {out:?}");
+        assert!(
+            out.to_lowercase().contains("hello"),
+            "expected to read 'Hello', got: {out:?}"
+        );
+    }
 }

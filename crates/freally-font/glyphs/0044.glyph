@@ -1,0 +1,25 @@
+# D — U+0044 capital dee. OUR OWN uniform-width stroked centerline (stroke 84),
+# reconstructed onto Noto's D shape on the grid (NOT a copy of Noto's curve data).
+# We reverse-engineered Noto's outline, took the MEDIAN line midway between its outer
+# and inner edges: left stem median x~139 (outer 95 / inner 183); flat top bar median
+# y~662 (outer 700 / inner 625); flat bottom bar median y~38 (outer 0 / inner 75);
+# right bowl bulge median max x~609 (outer 656 / inner 563) at mid-height y~355. The
+# top/bottom bars run flat from the stem then turn round at the right shoulders, fit
+# with one cubic per quarter so stroking 84 lands ours on Noto's outline. One solid
+# closed ring; the counter (hole) appears automatically inside the stroked ring.
+# Advance = Noto.
+advance 715
+stroke 84
+# bottom-left corner (stem foot)
+M 139 38
+# up the stem to the top-left corner
+L 139 662
+# flat top bar out to where the right shoulder begins
+L 304 662
+# top-right shoulder: round down to the mid-right bulge (max x)
+C 480 662 615 524 615 350
+# bottom-right shoulder: hold the bulge low, then round in to the flat bottom bar
+C 616 140 500 38 284 38
+# flat bottom bar back to the stem foot, close
+L 139 38
+Z

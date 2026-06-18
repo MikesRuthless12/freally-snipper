@@ -1,0 +1,19 @@
+# F — U+0046 capital eff. OUR OWN uniform-width stroked centerline (stroke 84),
+# reconstructed onto Noto's 'F' shape on the grid (NOT a copy of Noto's curve data).
+# We reverse-engineered Noto's outline (stem x[95..183] full height; top arm y[623..700]
+# to x486; middle arm y[297..375] to x468), took the MEDIAN centre line of each stroke
+# (stem centre x~139; top-arm centre y~661; middle-arm centre y~336) and re-cut OUR
+# straight median lines so stroking 84 lands ours on Noto's outline. Butt caps, so each
+# line ends flush on Noto's edge. Three subpaths UNION into one solid glyph (arms cross
+# the stem). Advance = Noto (508). Matches the uniform style of S/C/G/J/lowercase.
+advance 508
+stroke 84
+# vertical stem, full cap height (centre x139 -> strokes x[97..181] y[0..700])
+M 139 0
+L 139 700
+# top arm: stem -> right edge x486 (centre y661 -> strokes y[619..703])
+M 139 661
+L 486 661
+# middle arm: stem -> right edge x468 (centre y336 -> strokes y[294..378])
+M 139 336
+L 468 336

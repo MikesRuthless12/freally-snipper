@@ -1,0 +1,21 @@
+# e — U+0065. Reconstructed stroked centerline (our own outline on Noto's gridpoints).
+# Bowl = MEDIAN of Noto's outer/inner edges: near-circular ring, near-vertical right
+# eye-wall, OPEN at the lower-right mouth. Crossbar at the eye/mouth midline (y281).
+# FIX: the eye-wall, the crossbar's right end, AND the lower terminal all share the
+# SAME x (460) so the bar lines up vertically with the terminal — no gap/overhang.
+# One uniform brush. advance matched to Noto (552). stroke 84.
+advance 552
+stroke 84
+# --- open bowl: bar/wall junction, up the right wall, over the top, down the left,
+#     around the bottom, then out FLAT (horizontal) to the lower terminal at x460, so the
+#     terminal cuts straight/vertical like the crossbar (no upward curl), uniform with it ---
+M 460 281
+L 460 360
+C 460 432 372 493 285 493
+C 196 493 96 426 96 262
+C 96 134 192 32 287 32
+C 360 34 460 66 456 128
+# --- crossbar: left ring across to the right, ending at the SAME x as the bowl wall +
+#     lower terminal (502) so the bottom matches the top and there's no gap/notch ---
+M 96 281
+L 502 281

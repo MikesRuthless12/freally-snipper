@@ -25,6 +25,7 @@
 mod download;
 mod emoji;
 mod filters;
+mod fonts;
 mod models;
 mod objects;
 mod ocr;
@@ -42,8 +43,10 @@ struct TranslateReq {
 
 /// A message back from the translate worker.
 enum TranslateMsg {
-    /// The model is downloading/loading (first use).
+    /// The model is downloading/loading.
     Loading,
+    /// The model finished loading and the worker is idle (clears the preload note).
+    Ready,
     /// A translation finished (matched back to the object by index + text + target).
     Done {
         index: usize,
@@ -86,9 +89,6 @@ pub const CRATE_NAME: &str = "freally-editor";
 /// Zoom limits (points per image pixel): from a small overview to pixel-level.
 const MIN_ZOOM: f32 = 0.05;
 const MAX_ZOOM: f32 = 16.0;
-/// Keep at least this many points of the image inside the canvas when panning, so
-/// the picture can never be dragged completely out of view (foolproof controls).
-const PAN_KEEP: f32 = 40.0;
 
 /// Adjustable tool size range, in image pixels (the size slider's bounds).
 const MIN_WIDTH: f32 = 1.0;
@@ -141,6 +141,9 @@ enum Tool {
     Eyedropper,
     /// Drag a rectangle to crop the image (P4.6).
     Crop,
+    /// Drag a rectangle to OCR just that region → clipboard (P4.6b); a plain click
+    /// (no drag) OCRs the whole image.
+    OcrRegion,
 }
 
 impl Tool {
@@ -293,6 +296,10 @@ pub struct EditorSession {
     text_cache: HashMap<String, CachedText>,
     /// Source textures for image objects (P4.8), keyed by the object's stable id.
     image_textures: HashMap<u64, egui::TextureHandle>,
+    /// Colour-emoji thumbnails for the picker (P4.7), keyed by glyph. `None` means
+    /// the font can't render it, so the picker skips it (no tofu/missing). Cleared
+    /// when the picker closes to bound texture memory.
+    emoji_textures: HashMap<&'static str, Option<egui::TextureHandle>>,
     /// Next id to hand to a new image object.
     next_image_id: u64,
     /// Receiver for an in-flight OCR job (P4.6b), or `None` when idle.
@@ -312,6 +319,8 @@ pub struct EditorSession {
     translate_rx: Option<Receiver<TranslateMsg>>,
     pending_translate: Option<(f64, usize)>,
     translate_status: Option<String>,
+    /// One-shot guard: have we kicked off the background translator preload yet?
+    translate_preload_done: bool,
     /// Downloads / Models manager (P4.11): live per-asset download state, the
     /// exact remote sizes once probed, panel visibility, and a one-shot probe flag.
     downloads: Downloads,
@@ -328,8 +337,12 @@ pub struct EditorSession {
     obj_drag: ObjDrag,
     /// Whether the current object gesture has already pushed its undo snapshot.
     obj_undo_pushed: bool,
-    /// In-progress crop rectangle (image space): (drag start, current).
+    /// In-progress crop rectangle (image space): (drag start, current). Shared by
+    /// the Crop and OcrRegion tools (mutually exclusive).
     crop_drag: Option<(Pos2, Pos2)>,
+    /// A pending OCR request over this image-space region, set by the OcrRegion
+    /// tool and consumed in `ui()` (where the egui Context is available).
+    pending_ocr: Option<Rect>,
     /// Undo / redo history (raster image or object-list snapshots).
     undo: Vec<Edit>,
     redo: Vec<Edit>,
@@ -377,6 +390,7 @@ impl EditorSession {
             text_family: FontFamily::Sans,
             text_cache: HashMap::new(),
             image_textures: HashMap::new(),
+            emoji_textures: HashMap::new(),
             next_image_id: 0,
             ocr_rx: None,
             pending_text_copy: None,
@@ -389,6 +403,7 @@ impl EditorSession {
             translate_rx: None,
             pending_translate: None,
             translate_status: None,
+            translate_preload_done: false,
             downloads: Arc::new(Mutex::new(HashMap::new())),
             model_sizes: Arc::new(Mutex::new(HashMap::new())),
             show_models: false,
@@ -399,6 +414,7 @@ impl EditorSession {
             obj_drag: ObjDrag::None,
             obj_undo_pushed: false,
             crop_drag: None,
+            pending_ocr: None,
             undo: Vec::new(),
             redo: Vec::new(),
             notice: None,
@@ -447,10 +463,15 @@ impl EditorSession {
             self.redo();
         }
 
+        // When a text field (e.g. the Text/Watermark editor) holds keyboard focus,
+        // let it consume keys — don't also act on the canvas object, or typing
+        // Esc/Backspace/Delete would delete the very object you're editing.
+        let typing = ui.ctx().egui_wants_keyboard_input();
+
         // Esc: cancel an in-progress stroke; if nothing has been drawn yet, it
         // discards the capture (the Phase 3 behaviour). Once edits exist, Esc is
         // ignored so a stray press can't throw the work away — use Discard.
-        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        if !typing && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             if !self.stroke.is_empty() {
                 self.stroke.clear();
             } else if self.selected.is_some() {
@@ -460,8 +481,11 @@ impl EditorSession {
             }
         }
 
-        // Delete (or Backspace) removes the selected object.
-        if ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)) {
+        // Delete (or Backspace) removes the selected object — unless a text field
+        // has focus (see `typing` above), so editing a label isn't hijacked.
+        if !typing
+            && ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
+        {
             self.delete_selected();
         }
 
@@ -470,6 +494,13 @@ impl EditorSession {
         // Reflect finished translations + fire any debounced one (P4.9).
         self.poll_translate();
         self.drive_translate(ui);
+        // Preload the translator in the background once (only if its model is already
+        // downloaded), so the first translation is instant instead of a cold load.
+        if !self.translate_preload_done && models::is_installed(&models::TRANSLATE) {
+            self.translate_preload_done = true;
+            let ctx = ui.ctx().clone();
+            self.ensure_translate_worker(&ctx);
+        }
 
         let mut outcome = EditorOutcome::Active;
         egui::Panel::top("freally_toolbar2")
@@ -507,7 +538,6 @@ impl EditorSession {
         let mut chosen_filter: Option<Filter> = None;
         let mut chosen_tx: Option<TxAction> = None;
         let mut want_image = false;
-        let mut want_ocr = false;
         let ocr_running = self.ocr_rx.is_some();
         ui.horizontal_wrapped(|ui| {
             self.tool_button(
@@ -535,7 +565,7 @@ impl EditorSession {
             // Shapes ▾ — pick a kind, then drag on the image to draw it (P4.3).
             let shape_label = match self.tool {
                 Tool::Shape(kind) => format!("Shape: {}", kind.label()),
-                _ => "Shapes ▾".to_owned(),
+                _ => "Shapes".to_owned(),
             };
             ui.menu_button(shape_label, |ui| {
                 for kind in ShapeKind::ALL {
@@ -573,7 +603,7 @@ impl EditorSession {
             }
             ui.separator();
             // Filters ▾ — live, undoable image filters (P4.5).
-            ui.menu_button("Filters ▾", |ui| {
+            ui.menu_button("Filters", |ui| {
                 for (filter, label) in Filter::MENU {
                     if ui.button(label).clicked() {
                         chosen_filter = Some(filter);
@@ -584,7 +614,7 @@ impl EditorSession {
             .response
             .on_hover_text("Apply a live, undoable filter to the image");
             // Transform ▾ — rotate / flip / bevel / crop (P4.6).
-            ui.menu_button("Transform ▾", |ui| {
+            ui.menu_button("Transform", |ui| {
                 if ui.button("Rotate left").clicked() {
                     chosen_tx = Some(TxAction::RotateCcw);
                     ui.close();
@@ -634,10 +664,13 @@ impl EditorSession {
                 disabled_tool(ui, "Extracting…", "Running OCR — extracting text");
             } else if ui
                 .button("Extract Text")
-                .on_hover_text("OCR the image and copy the text to the clipboard")
+                .on_hover_text(
+                    "Drag a box around the text to extract (→ clipboard); click once for the \
+                     whole image",
+                )
                 .clicked()
             {
-                want_ocr = true;
+                self.tool = Tool::OcrRegion;
             }
             ui.separator();
             if ui
@@ -656,10 +689,6 @@ impl EditorSession {
         }
         if want_image {
             self.insert_image();
-        }
-        if want_ocr {
-            let ctx = ui.ctx().clone();
-            self.start_ocr(&ctx);
         }
         ui.add_space(2.0);
         ui.separator();
@@ -703,7 +732,8 @@ impl EditorSession {
                     ui.label("Size");
                     ui.add(
                         egui::Slider::new(&mut self.shape_width, MIN_WIDTH..=MAX_WIDTH)
-                            .suffix(" px"),
+                            .suffix(" px")
+                            .clamping(egui::SliderClamping::Always),
                     )
                     .on_hover_text("Outline width in image pixels");
                     ui.separator();
@@ -719,7 +749,21 @@ impl EditorSession {
             }
             Tool::Text | Tool::Watermark => self.text_defaults_ui(ui),
             Tool::Eyedropper => {
-                ui.label(egui::RichText::new("Click a pixel to set the markup colour").weak());
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(egui::RichText::new("Click a pixel to set the markup colour").weak());
+                    ui.separator();
+                    ui.color_edit_button_srgba_unmultiplied(&mut self.color)
+                        .on_hover_text("Current markup colour (updates when you pick)");
+                });
+            }
+            Tool::OcrRegion => {
+                ui.label(
+                    egui::RichText::new(
+                        "Drag a box around the text to extract (→ clipboard); click once for \
+                         the whole image",
+                    )
+                    .weak(),
+                );
             }
             Tool::Crop => {
                 ui.label(egui::RichText::new("Drag a rectangle, then release to crop").weak());
@@ -777,7 +821,12 @@ impl EditorSession {
     fn text_defaults_ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             ui.label("Size");
-            ui.add(egui::Slider::new(&mut self.text_px, 8.0..=240.0).suffix(" px"));
+            ui.add(
+                egui::Slider::new(&mut self.text_px, 8.0..=240.0)
+                    .suffix(" px")
+                    .clamping(egui::SliderClamping::Always),
+            );
+            self.text_px = self.text_px.clamp(8.0, 240.0);
             ui.separator();
             ui.label("Font");
             family_combo(ui, "text_default_family", &mut self.text_family);
@@ -822,11 +871,15 @@ impl EditorSession {
             ui.label("Size");
             let mut px = self.objects[i].text().map(|t| t.font_px).unwrap_or(48.0);
             if ui
-                .add(egui::Slider::new(&mut px, 8.0..=240.0).suffix(" px"))
+                .add(
+                    egui::Slider::new(&mut px, 8.0..=240.0)
+                        .suffix(" px")
+                        .clamping(egui::SliderClamping::Always),
+                )
                 .changed()
             {
                 if let Some(t) = self.objects[i].text_mut() {
-                    t.font_px = px;
+                    t.font_px = px.clamp(8.0, 240.0);
                 }
             }
             ui.separator();
@@ -848,7 +901,18 @@ impl EditorSession {
             }
             ui.separator();
             ui.label("Color");
-            ui.color_edit_button_srgba_unmultiplied(&mut self.objects[i].color);
+            // Edit RGB only — opacity is the slider above, so the swatch keeps its
+            // hue instead of going black when opacity is lowered to zero.
+            let mut rgb = [
+                self.objects[i].color[0],
+                self.objects[i].color[1],
+                self.objects[i].color[2],
+            ];
+            if ui.color_edit_button_srgb(&mut rgb).changed() {
+                self.objects[i].color[0] = rgb[0];
+                self.objects[i].color[1] = rgb[1];
+                self.objects[i].color[2] = rgb[2];
+            }
 
             // Translate-as-you-type (P4.9): pick an output language; MADLAD auto-
             // detects the typed source. Searchable so ~99+ languages stay findable.
@@ -1051,11 +1115,16 @@ impl EditorSession {
         // Pan + draw (may bake a stroke and re-upload the texture this frame).
         self.handle_pointer(&response, canvas);
 
+        // Kick off a region OCR selected this frame (needs the egui Context).
+        if let Some(region) = self.pending_ocr.take() {
+            let ctx = ui.ctx().clone();
+            self.start_ocr(&ctx, region);
+        }
+
         self.view.offset = clamp_offset(
             self.view.offset,
             self.image_size() * self.view.zoom,
             canvas.size(),
-            PAN_KEEP,
         );
 
         // Render/cache text stamps + image textures and keep bounds in sync.
@@ -1120,7 +1189,20 @@ impl EditorSession {
             objects::draw_selection(&painter, obj, &to_screen, HANDLE_PX);
         }
 
-        // Crop rectangle preview (P4.6).
+        // Show a resize cursor over a selection handle, so it's clear the object can
+        // be resized by dragging its corners (P4.3 polish).
+        if self.tool == Tool::Select {
+            if let (Some(i), Some(hover)) = (self.selected, response.hover_pos()) {
+                let p = self.screen_to_image(canvas, hover);
+                if let Some(h) = self.handle_at(i, p) {
+                    if let Some(obj) = self.objects.get(i) {
+                        ui.ctx().set_cursor_icon(handle_cursor(obj, h));
+                    }
+                }
+            }
+        }
+
+        // Crop / OCR-region selection preview (P4.6).
         if let Some((a, b)) = self.crop_drag {
             let r = Rect::from_two_pos(to_screen(a), to_screen(b));
             painter.rect_stroke(
@@ -1150,6 +1232,7 @@ impl EditorSession {
             Tool::Text | Tool::Watermark => self.handle_text_tool(response, pointer),
             Tool::Eyedropper => self.handle_eyedropper(response, pointer),
             Tool::Crop => self.handle_crop(response, pointer),
+            Tool::OcrRegion => self.handle_ocr_region(response, pointer),
             _ => self.handle_raster(response, pointer),
         }
     }
@@ -1245,12 +1328,14 @@ impl EditorSession {
                         self.ensure_obj_undo();
                         if let Some(i) = self.selected {
                             self.objects[i].translate(delta / self.view.zoom);
+                            self.clamp_object_into_image(i, true);
                         }
                     }
                     ObjDrag::Handle(h) => {
                         self.ensure_obj_undo();
                         if let (Some(i), Some(p)) = (self.selected, pointer) {
                             self.objects[i].drag_handle(h, p);
+                            self.clamp_object_into_image(i, false);
                         }
                     }
                     _ => {}
@@ -1267,6 +1352,7 @@ impl EditorSession {
     fn handle_shape(&mut self, response: &egui::Response, kind: ShapeKind, pointer: Option<Pos2>) {
         if response.drag_started_by(PointerButton::Primary) {
             if let Some(p) = pointer {
+                let p = clamp_pos(p, self.image_size());
                 self.push_objects_undo();
                 self.objects.push(Object {
                     kind: Kind::Shape(kind),
@@ -1281,7 +1367,7 @@ impl EditorSession {
             }
         } else if response.dragged_by(PointerButton::Primary) && self.obj_drag == ObjDrag::Create {
             if let (Some(i), Some(p)) = (self.selected, pointer) {
-                self.objects[i].b = p;
+                self.objects[i].b = clamp_pos(p, self.image_size());
             }
         } else if response.drag_stopped_by(PointerButton::Primary)
             && self.obj_drag == ObjDrag::Create
@@ -1325,6 +1411,39 @@ impl EditorSession {
         obj.handles().into_iter().position(|h| h.distance(p) <= tol)
     }
 
+    /// Keep object `i` inside the image: when `shift`, move the whole object back so
+    /// its box stays on-canvas (so nothing can be dragged off the picture); otherwise
+    /// clamp its two corner points into the image (resize / create).
+    fn clamp_object_into_image(&mut self, i: usize, shift: bool) {
+        let size = self.image_size();
+        let Some(obj) = self.objects.get_mut(i) else {
+            return;
+        };
+        if shift {
+            let b = obj.bounds();
+            let axis = |min: f32, max: f32, span: f32| {
+                // Larger than the image, or past the near edge → pin the top/left edge.
+                if max - min > span || min < 0.0 {
+                    -min
+                } else if max > span {
+                    span - max
+                } else {
+                    0.0
+                }
+            };
+            let d = egui::vec2(
+                axis(b.min.x, b.max.x, size.x),
+                axis(b.min.y, b.max.y, size.y),
+            );
+            obj.translate(d);
+        } else {
+            obj.a.x = obj.a.x.clamp(0.0, size.x);
+            obj.a.y = obj.a.y.clamp(0.0, size.y);
+            obj.b.x = obj.b.x.clamp(0.0, size.x);
+            obj.b.y = obj.b.y.clamp(0.0, size.y);
+        }
+    }
+
     /// Remove the selected object (undoable).
     fn delete_selected(&mut self) {
         if let Some(i) = self.selected {
@@ -1361,7 +1480,7 @@ impl EditorSession {
             Tool::Highlighter => Paint::Highlight {
                 color: rgb,
                 alpha: HL_ALPHA,
-                text_only: self.hl_mode == HlMode::TextAware,
+                text_aware: self.hl_mode == HlMode::TextAware,
             },
             Tool::Eraser => match self.erase_mode {
                 EraseMode::White => Paint::White,
@@ -1372,7 +1491,8 @@ impl EditorSession {
             | Tool::Text
             | Tool::Watermark
             | Tool::Eyedropper
-            | Tool::Crop => return None,
+            | Tool::Crop
+            | Tool::OcrRegion => return None,
         })
     }
 
@@ -1388,7 +1508,8 @@ impl EditorSession {
             | Tool::Text
             | Tool::Watermark
             | Tool::Eyedropper
-            | Tool::Crop => 0.0,
+            | Tool::Crop
+            | Tool::OcrRegion => 0.0,
         }
     }
 
@@ -1405,7 +1526,8 @@ impl EditorSession {
             | Tool::Text
             | Tool::Watermark
             | Tool::Eyedropper
-            | Tool::Crop => {}
+            | Tool::Crop
+            | Tool::OcrRegion => {}
         }
     }
 
@@ -1598,10 +1720,13 @@ impl EditorSession {
         }
         let Some(p) = pointer else { return };
         let (x, y) = (p.x.floor() as i32, p.y.floor() as i32);
-        if x < 0 || y < 0 || x as u32 >= self.image.width() || y as u32 >= self.image.height() {
+        // Sample the composited image so overlay objects (markup / text / shapes /
+        // emoji / placed images) are pickable too, not just the base raster.
+        let img = self.baked();
+        if x < 0 || y < 0 || x as u32 >= img.width() || y as u32 >= img.height() {
             return;
         }
-        let px = self.image.get_pixel(x as u32, y as u32).0;
+        let px = img.get_pixel(x as u32, y as u32).0;
         self.color = [px[0], px[1], px[2], self.color[3]];
         self.notice = Some(format!("Picked #{:02X}{:02X}{:02X}", px[0], px[1], px[2]));
     }
@@ -1628,14 +1753,52 @@ impl EditorSession {
         }
     }
 
-    /// Start OCR on the current raster on a worker thread (P4.6b). The first run
-    /// downloads the models; the result is handed to the app for the clipboard.
-    fn start_ocr(&mut self, ctx: &egui::Context) {
+    /// OCR-region tool: drag a rectangle to OCR just that region (→ clipboard), or
+    /// click once (no drag) to OCR the whole image. Records the region; `ui()`
+    /// starts the worker. Reuses `crop_drag` for the live selection rectangle.
+    fn handle_ocr_region(&mut self, response: &egui::Response, pointer: Option<Pos2>) {
+        if response.drag_started_by(PointerButton::Primary) {
+            self.crop_drag = pointer.map(|p| (p, p));
+        } else if response.dragged_by(PointerButton::Primary) {
+            if let (Some(drag), Some(p)) = (self.crop_drag.as_mut(), pointer) {
+                drag.1 = p;
+            }
+        } else if response.drag_stopped_by(PointerButton::Primary) {
+            if let Some((a, b)) = self.crop_drag.take() {
+                self.pending_ocr = Some(Rect::from_two_pos(a, b));
+                self.tool = Tool::Select;
+            }
+        } else if response.clicked_by(PointerButton::Primary) {
+            // A click with no drag → OCR the whole image.
+            self.pending_ocr = Some(Rect::from_min_size(Pos2::ZERO, self.image_size()));
+            self.tool = Tool::Select;
+        }
+    }
+
+    /// Crop the base raster to `region` (image-space), clamped to the image. Returns
+    /// the whole image if the region is empty/degenerate (e.g. a stray click) or
+    /// already covers the whole image.
+    fn ocr_crop(&self, region: Rect) -> RgbaImage {
+        let (iw, ih) = (self.image.width() as f32, self.image.height() as f32);
+        let x0 = region.min.x.min(region.max.x).floor().clamp(0.0, iw);
+        let y0 = region.min.y.min(region.max.y).floor().clamp(0.0, ih);
+        let x1 = region.max.x.max(region.min.x).ceil().clamp(0.0, iw);
+        let y1 = region.max.y.max(region.min.y).ceil().clamp(0.0, ih);
+        let (w, h) = ((x1 - x0) as u32, (y1 - y0) as u32);
+        if w < 2 || h < 2 || (w >= self.image.width() && h >= self.image.height()) {
+            return self.image.clone();
+        }
+        transforms::crop(&self.image, x0 as i32, y0 as i32, w, h)
+    }
+
+    /// Start OCR over `region` of the raster on a worker thread (P4.6b). The first
+    /// run downloads the models; the result is handed to the app for the clipboard.
+    fn start_ocr(&mut self, ctx: &egui::Context, region: Rect) {
         if self.ocr_rx.is_some() {
             return;
         }
         let (tx, rx) = std::sync::mpsc::channel();
-        let image = self.image.clone();
+        let image = self.ocr_crop(region); // scan only the selection — far faster
         let ctx = ctx.clone();
         let downloads = self.downloads.clone();
         let spawned = std::thread::Builder::new()
@@ -1698,30 +1861,31 @@ impl EditorSession {
         let spawned = std::thread::Builder::new()
             .name("freally-translate".to_owned())
             .spawn(move || {
-                let mut engine: Option<translate::Translator> = None;
-                let mut load_err: Option<String> = None;
+                // Load the model up front (preload) so the first translation is
+                // instant. From the preload path it's already downloaded (a disk
+                // read); the lazy first-use path downloads it here.
+                let _ = msg_tx.send(TranslateMsg::Loading);
+                ctx.request_repaint();
+                let reporter =
+                    download_reporter(downloads.clone(), ctx.clone(), &models::TRANSLATE);
+                let (mut engine, load_err) = match translate::Translator::load(reporter) {
+                    Ok(t) => {
+                        finish_download(&downloads, models::TRANSLATE.id, Ok(()));
+                        (Some(t), None)
+                    }
+                    Err(e) => {
+                        finish_download(&downloads, models::TRANSLATE.id, Err(e.clone()));
+                        (None, Some(e))
+                    }
+                };
+                let _ = msg_tx.send(TranslateMsg::Ready);
+                ctx.request_repaint();
                 while let Ok(req) = req_rx.recv() {
                     // Coalesce a backlog: if the user kept typing, skip stale
                     // requests and translate only the most recent (review #9).
                     let mut req = req;
                     while let Ok(newer) = req_rx.try_recv() {
                         req = newer;
-                    }
-                    if engine.is_none() && load_err.is_none() {
-                        let _ = msg_tx.send(TranslateMsg::Loading);
-                        ctx.request_repaint();
-                        let reporter =
-                            download_reporter(downloads.clone(), ctx.clone(), &models::TRANSLATE);
-                        match translate::Translator::load(reporter) {
-                            Ok(t) => {
-                                engine = Some(t);
-                                finish_download(&downloads, models::TRANSLATE.id, Ok(()));
-                            }
-                            Err(e) => {
-                                finish_download(&downloads, models::TRANSLATE.id, Err(e.clone()));
-                                load_err = Some(e);
-                            }
-                        }
                     }
                     let result = match (engine.as_mut(), &load_err) {
                         (Some(t), _) => t.translate(&req.text, &req.target),
@@ -1754,8 +1918,20 @@ impl EditorSession {
         for m in msgs {
             match m {
                 TranslateMsg::Loading => {
-                    self.translate_status =
-                        Some("Loading translator (first run downloads ~3 GB)…".to_owned());
+                    // Don't override an active "Translating…" with the preload note.
+                    if self.translate_status.is_none() {
+                        self.translate_status =
+                            Some("Preparing translator (loading model)…".to_owned());
+                    }
+                }
+                TranslateMsg::Ready => {
+                    // Model finished loading; clear the preload note (but not an
+                    // in-flight "Translating…").
+                    if self.translate_status.as_deref()
+                        == Some("Preparing translator (loading model)…")
+                    {
+                        self.translate_status = None;
+                    }
                 }
                 TranslateMsg::Done {
                     index,
@@ -2092,17 +2268,37 @@ impl EditorSession {
                         ui.text_edit_singleline(&mut self.emoji_search);
                     });
                     ui.separator();
+                    let font = self.emoji_font.clone();
                     egui::ScrollArea::vertical()
                         .max_height(280.0)
                         .show(ui, |ui| {
                             ui.horizontal_wrapped(|ui| {
                                 for (glyph, name) in emoji::search(&self.emoji_search, 240) {
-                                    if ui
-                                        .button(egui::RichText::new(glyph).size(22.0))
-                                        .on_hover_text(name)
-                                        .clicked()
-                                    {
-                                        pick = Some(glyph.to_owned());
+                                    // Render each entry as a colour bitmap via swash
+                                    // (egui's own fonts are monochrome), and skip any
+                                    // glyph the font can't render — no tofu/missing.
+                                    let tex =
+                                        self.emoji_textures.entry(glyph).or_insert_with(|| {
+                                            let bytes = font.as_ref()?;
+                                            let img = emoji::rasterize(bytes, glyph)?;
+                                            Some(ctx.load_texture(
+                                                format!("freally_emoji_{glyph}"),
+                                                egui::ColorImage::from_rgba_unmultiplied(
+                                                    [img.width() as usize, img.height() as usize],
+                                                    img.as_raw(),
+                                                ),
+                                                egui::TextureOptions::LINEAR,
+                                            ))
+                                        });
+                                    if let Some(tex) = tex {
+                                        let btn =
+                                            egui::Button::image(egui::load::SizedTexture::new(
+                                                tex.id(),
+                                                egui::vec2(26.0, 26.0),
+                                            ));
+                                        if ui.add(btn).on_hover_text(name).clicked() {
+                                            pick = Some(glyph.to_owned());
+                                        }
                                     }
                                 }
                             });
@@ -2123,6 +2319,9 @@ impl EditorSession {
                 }
             });
         self.show_emoji_picker = open;
+        if !open {
+            self.emoji_textures.clear(); // bound texture memory between sessions
+        }
         if let Some(glyph) = pick {
             self.insert_emoji(&glyph);
         }
@@ -2244,6 +2443,39 @@ fn upload(ctx: &egui::Context, image: &RgbaImage) -> egui::TextureHandle {
     let size = [image.width() as usize, image.height() as usize];
     let color = egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw());
     ctx.load_texture("freally_editor_image", color, egui::TextureOptions::NEAREST)
+}
+
+/// Clamp an image-space point into the `[0, size]` image rectangle.
+fn clamp_pos(p: Pos2, size: Vec2) -> Pos2 {
+    egui::pos2(p.x.clamp(0.0, size.x), p.y.clamp(0.0, size.y))
+}
+
+/// The 2-way resize cursor for selection handle `h` of `obj` — diagonal for box
+/// corners (Rect/Oval/Image), and aligned to the line for Line/Arrow endpoints
+/// (so endpoints show a real resize arrow, not a move/grab cursor).
+fn handle_cursor(obj: &Object, h: usize) -> egui::CursorIcon {
+    use egui::CursorIcon::{ResizeHorizontal, ResizeNeSw, ResizeNwSe, ResizeVertical};
+    let hs = obj.handles();
+    if hs.len() == 2 {
+        // Line/Arrow endpoint: orient the double-arrow along the line.
+        let v = hs[1] - hs[0];
+        let deg = v.y.atan2(v.x).to_degrees().rem_euclid(180.0);
+        if !(22.5..157.5).contains(&deg) {
+            ResizeHorizontal
+        } else if deg < 67.5 {
+            ResizeNwSe
+        } else if deg < 112.5 {
+            ResizeVertical
+        } else {
+            ResizeNeSw
+        }
+    } else {
+        // Box corners: 0 = TL, 1 = TR, 2 = BR, 3 = BL.
+        match h {
+            0 | 2 => ResizeNwSe,
+            _ => ResizeNeSw,
+        }
+    }
 }
 
 /// A disabled Toolbar 2 tool button (present, but enabled in a later prompt).
@@ -2425,16 +2657,16 @@ fn zoom_about(offset: Vec2, pivot: Vec2, old: f32, new: f32) -> Vec2 {
     pivot - (pivot - offset) * (new / old)
 }
 
-/// Clamp the pan `offset` so at least `keep` points of the `scaled`-size image
-/// stay within an `avail`-size canvas on each axis.
-fn clamp_offset(offset: Vec2, scaled: Vec2, avail: Vec2, keep: f32) -> Vec2 {
+/// Clamp the pan `offset` so the `scaled`-size image stays usefully in an
+/// `avail`-size canvas on each axis: **centered while it fits** (so the whole
+/// picture is always visible), and otherwise pannable but never dragged past a
+/// viewport edge — no empty gutter beside a too-large image (foolproof controls).
+fn clamp_offset(offset: Vec2, scaled: Vec2, avail: Vec2) -> Vec2 {
     let clamp_axis = |off: f32, size: f32, span: f32| {
-        let lo = keep - size; // image's right/bottom edge ≥ `keep` from the left/top
-        let hi = span - keep; // image's left/top edge ≤ `keep` from the right/bottom
-        if lo > hi {
-            (lo + hi) * 0.5
+        if size <= span {
+            (span - size) * 0.5 // fits: lock centered, always fully visible
         } else {
-            off.clamp(lo, hi)
+            off.clamp(span - size, 0.0) // larger: an edge can't cross the viewport
         }
     };
     egui::vec2(
@@ -2534,16 +2766,30 @@ mod tests {
     }
 
     #[test]
-    fn clamp_offset_keeps_image_partly_in_view() {
-        // Tiny image, big canvas: can't push it past the keep margin on either side.
-        let scaled = egui::vec2(20.0, 20.0);
+    fn clamp_offset_centers_when_fits_and_pins_edges_when_larger() {
         let avail = egui::vec2(800.0, 600.0);
-        let keep = 40.0;
-        // Far off to the left/top is pulled back so ≥ keep stays visible.
-        let c = clamp_offset(egui::vec2(-1000.0, -1000.0), scaled, avail, keep);
-        assert_eq!(c, egui::vec2(keep - scaled.x, keep - scaled.y));
-        // Far off to the right/bottom is pulled back to the opposite limit.
-        let c = clamp_offset(egui::vec2(5000.0, 5000.0), scaled, avail, keep);
-        assert_eq!(c, egui::vec2(avail.x - keep, avail.y - keep));
+        // Small image in a big canvas: always centered (fully visible), no matter
+        // how far the user tried to drag it.
+        let small = egui::vec2(20.0, 20.0);
+        let centered = egui::vec2((800.0 - 20.0) * 0.5, (600.0 - 20.0) * 0.5);
+        assert_eq!(
+            clamp_offset(egui::vec2(-1000.0, -1000.0), small, avail),
+            centered
+        );
+        assert_eq!(
+            clamp_offset(egui::vec2(5000.0, 5000.0), small, avail),
+            centered
+        );
+        // Larger-than-canvas image: pannable, but an edge can't cross the viewport
+        // edge — offset clamped to [span - size, 0] per axis (no empty gutter).
+        let big = egui::vec2(1000.0, 900.0);
+        assert_eq!(
+            clamp_offset(egui::vec2(500.0, 500.0), big, avail),
+            egui::vec2(0.0, 0.0)
+        );
+        assert_eq!(
+            clamp_offset(egui::vec2(-5000.0, -5000.0), big, avail),
+            egui::vec2(800.0 - 1000.0, 600.0 - 900.0),
+        );
     }
 }

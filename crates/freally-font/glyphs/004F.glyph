@@ -1,0 +1,11 @@
+# O — U+004F capital oh. OUR OWN uniform-width stroked centerline (stroke 84),
+# reconstructed onto Noto's round-bowl shape on the grid (NOT a copy of Noto's
+# curve data). Reverse-engineered Noto: outer edge x60..706 y-10..711, inner
+# counter x153..613 y67..633; centre (383,350). MEDIAN ring (midway between outer
+# & inner edges): rx (323+230)/2=276.5, ry (360.5+283)/2=321.75. Stroking that ring
+# at 84 lands ours on Noto's outline; the counter/hole appears inside automatically.
+# Advance = Noto (765). Replaces the old thick/thin-contrast version → matches the
+# uniform style of S, C, G, J and all lowercase.
+advance 765
+stroke 84
+ellipse 383 350 281 319

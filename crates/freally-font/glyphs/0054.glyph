@@ -1,0 +1,21 @@
+# T — U+0054 capital tee. OUR OWN uniform-width stroked centerline (stroke 84),
+# reconstructed on Noto's gridpoints (NOT a copy of Noto's curve data). Matches the
+# uniform-stroke family (S, C, G, J, o) — one brush, every glyph the same width.
+# Units: 1000 UPEM, y-up, baseline 0. CAP 700 (flat top, no overshoot).
+# Noto skeleton (median of outer/inner edges, in our grid units):
+#   top bar: outer x 10..534, y 623..700 -> centre y ~660, span x 10..534
+#   stem:    outer x 228..317 (w 89), baseline..623 -> centre x ~272
+# We trace only the two centre lines; stroke 84 reconstructs the outline on Noto's
+# gridpoints. Bar endpoints inset 42 so the butt caps land on Noto's x 10 / 534;
+# bar centre y 658 so the top edge lands on the cap line 700. Stem centre x 272,
+# foot endpoint y 42 so the butt cap grounds on baseline 0; stem top runs up into
+# the bar centre (overlap unions into one solid shape). Advance = Noto (544).
+advance 544
+stroke 84
+# top bar: horizontal centre line at y 658, terminals inset 42 so the butt caps
+# land on Noto's bar corners (x 10 / 534); centre y 658 lands the top edge on cap 700.
+M 52 658
+L 492 658
+# vertical stem: centre x 272, from the bar down to the baseline foot
+M 272 658
+L 272 42

@@ -1,0 +1,6 @@
+# o — U+006F. Stroked centerline; round bowl on the MEDIAN ellipse, midway between
+# Noto's outer (x54..540 y-10..535) and inner (x143..451 y62..463) edges. Closed
+# loop, uniform stroke 84 lands ours on Noto's outline. stroke 84.
+advance 592
+stroke 84
+ellipse 297 262 202 231

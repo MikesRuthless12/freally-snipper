@@ -1,0 +1,11 @@
+# v — U+0076. Stroked centerline; two straight diagonals meeting at a bottom apex.
+# Reconstructed on Noto's gridpoints: left top edge x0..92, right top edge x406..498,
+# both at x-height 525; outer V tip ~x248 y0. Median tops nudged out to x40/458 and
+# dropped to y516 so the perpendicular butt caps land outer corners on x0/x498, and the
+# apex raised to y40 so the round join's tip sits on the baseline. Uniform stroke 84
+# lands ours on Noto's outline (W 502 vs 498, outer x[-2..500] vs [0..498]). stroke 84.
+advance 497
+stroke 84
+M 40 516
+L 248 40
+L 458 516

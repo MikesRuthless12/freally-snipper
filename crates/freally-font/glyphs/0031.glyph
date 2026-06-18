@@ -1,0 +1,14 @@
+# 1 — U+0031 one. OUR OWN uniform-width stroked centerline (stroke 84), reconstructed
+# to sit on Noto's shape on the grid (NOT a copy of Noto's curve data). We reverse-
+# engineered Noto's outline: the stem is x[264..348] y[0..700] -> centre x=306 full
+# height; the flag is a diagonal whose median runs from the tip centre ~(111,522) up
+# into the stem ~(306,668) (its butt cap reproduces Noto's (132,495)/(87,553) tip
+# corners). Two centre lines UNION into one solid digit. Advance = Noto (560).
+advance 560
+stroke 84
+# vertical stem (centre x=306, baseline to flat top at 700)
+M 306 0
+L 306 700
+# top-left flag (median from tip up into the stem)
+M 111 522
+L 306 668

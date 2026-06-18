@@ -1,0 +1,13 @@
+# M — U+004D. ONE continuous stroked path (left stem -> top flat -> diagonal to the V
+# apex -> diagonal up -> right top flat -> right stem) so the middle V is a clean join
+# with NO notch at the bottom. Uniform stroke 84. Apex at (444,40) so the V foot grounds
+# on the baseline.
+advance 888
+stroke 84
+M 136 0
+L 136 658
+L 220 658
+L 444 40
+L 669 658
+L 750 658
+L 750 0

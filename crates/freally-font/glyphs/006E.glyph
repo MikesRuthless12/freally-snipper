@@ -1,0 +1,12 @@
+# n — U+006E. Stroked centerline (uniform brush 84). Left stem + humanist shoulder
+# arch over to the right stem. Medians midway between Noto's outer/inner edges:
+# left stem ctr x126 (83/170), right stem ctr x484 (441/526), arch apex y~499
+# (outer 535 / inner 463), x-height 525, baseline 0. stroke 84.
+advance 605
+stroke 84
+M 126 0
+L 126 525
+M 126 405
+C 190 448 256 493 308 493
+C 410 493 484 470 484 380
+L 484 0

@@ -6,6 +6,7 @@ members = [
     "crates/editor",
     "crates/asr",
     "crates/video",
+    "crates/freally-font",
 ]
 
 # Shared package metadata, inherited by every member via `field.workspace = true`.

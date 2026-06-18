@@ -1,0 +1,14 @@
+# w — U+0077. Stroked centerline; four diagonals = two joined V's (\/\/).
+# Reconstructed on Noto's gridpoints (our grid). Each vertex is the MEDIAN, midway
+# between that bar's outer & inner edges: top-left terminal centre ~53, valley1 ~199,
+# middle peak ~385 (Noto's flat top 339..433 over inner-notch tip 384,436), valley2
+# ~571, top-right terminal centre ~718. Valleys raised so stroked tips land on the
+# baseline; terminals just below x-height; uniform stroke 84 lands ours on Noto's
+# outline (x[11..760] matches). stroke 84.
+advance 769
+stroke 84
+M 53 513
+L 199 44
+L 385 480
+L 571 44
+L 718 513

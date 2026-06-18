@@ -1,0 +1,19 @@
+# H — U+0048 capital aitch. OUR OWN uniform-width stroked centerline (stroke 84),
+# reconstructed onto Noto's shape on the grid (NOT a copy of Noto's curve data).
+# Reverse-engineered Noto's outline: left stem outer x95 inner x183 -> median x139;
+# right stem inner x542 outer x630 -> median x586; crossbar edges y326..404 -> median
+# y365. Flat top/foot (no overshoot): stem centre-lines run y42..658 so the butt caps
+# ground on baseline 0 and land on the cap line 700 (matches I/L/T/E family). Crossbar
+# runs stem-centre to stem-centre so it unions over both stems. stroke 84 lands ours on
+# Noto's outline. Advance = Noto (725).
+advance 725
+stroke 84
+# left stem (median x139), full height — butt caps ground on baseline 0 + cap 700
+M 139 0
+L 139 700
+# right stem (median x586), full height
+M 586 0
+L 586 700
+# crossbar (median y365), run stem-centre to stem-centre so it crosses both stems
+M 139 365
+L 586 365

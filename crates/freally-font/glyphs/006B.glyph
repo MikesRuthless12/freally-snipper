@@ -1,0 +1,21 @@
+# k — U+006B lowercase kay. Stroked centerline (uniform brush, stroke 84) — our own
+# outline reconstructed on Noto's gridpoints, not a copy of Noto's curve data.
+# Noto 'k': stem outer x83..169 -> centre x=126, baseline 0 -> ascender 745. The ARM
+# (upper diagonal) runs from inside the stem up-right to a tip at x-height (Noto tip
+# 399..500,525 -> centre (449.5,525)); the LEG (lower diagonal) branches off the arm
+# at the junction (~235,303) down-right to a foot at the baseline (Noto foot 411..515,0
+# -> centre (463,0)). Each median runs ~42 inside Noto's outer edge so stroking at 84
+# lands ours on Noto's outline; diagonal ends reach the corners so the round caps fill
+# Noto's flat tip / foot. The open mouth of the k (right of the junction) stays empty.
+# stroke 84.
+advance 523
+stroke 84
+# vertical stem centreline, x=126 (inset 42 top/foot for the round caps)
+M 126 0
+L 126 745
+# upper ARM: from inside the stem, up-right through the junction to the tip
+M 126 195
+L 458 518
+# lower LEG: branches off the junction (on the arm) down-right to the foot
+M 235 303
+L 465 27

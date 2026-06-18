@@ -1,0 +1,24 @@
+# E — U+0045 capital ee. OUR OWN uniform-width stroked centerline (stroke 84),
+# reconstructed to sit on Noto's shape on the grid (NOT a copy of Noto's curve data).
+# We reverse-engineered Noto's outline: stem outer x95 / inner x183 -> median centre
+# x~139; top arm y623..700 -> centre ~662; bottom arm y0..77 -> centre ~38; middle arm
+# y327..404 -> centre ~366 (right edge 469, a hair short of the 486 top/bottom arms).
+# Vertical centre line sits ~42 inside Noto's left edge so stroking 84 lands the stem
+# on Noto's stem. Stem spans baseline..cap (butt caps land on those lines). Arms start
+# at the stem centre so corners union solid; the butt cap does NOT extend, so each arm's
+# right end is taken OUT to Noto's actual right edge (486 top/bottom, 469 middle) so the
+# cap lands on the outline. Advance = Noto.
+advance 544
+stroke 84
+# vertical stem, baseline -> cap (centre x137)
+M 137 0
+L 137 700
+# top arm: stem centre -> Noto's right edge 486
+M 137 662
+L 486 662
+# middle arm: shorter; stem centre -> Noto's right edge 469
+M 137 366
+L 469 366
+# bottom arm: stem centre -> Noto's right edge 486
+M 137 38
+L 486 38

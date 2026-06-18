@@ -1,0 +1,9 @@
+# 4 — U+0034 four. ONE continuous stroked path (stem -> blade -> crossbar) so everything
+# UNIONS solid with NO notches, and full height (baseline 0 to cap 700) like the other
+# digits. Uniform stroke 84. The triangular counter forms in the open upper-left.
+advance 560
+stroke 84
+M 397 0
+L 397 700
+L 70 210
+L 499 210

@@ -1,0 +1,19 @@
+# Q — U+0051 capital cue. OUR OWN uniform-width stroked centerline (stroke 84),
+# reconstructed to sit on Noto's Q on the grid (NOT a copy of Noto's curve data).
+# Reverse-engineered Noto: outer ellipse ~ cx383 cy350 rx323 ry360, inner (counter)
+# ~ cx383 cy350 rx230 ry283 → MEDIAN ring cx383 cy350 rx277 ry322 (stroking 84 lands
+# ours on Noto's outline; the counter/hole appears automatically inside the ring).
+# Tail = a single straight median stroke springing from ~5 o'clock down to a blunt tip
+# below the baseline; its two parallel edges are ~84 apart in Noto, so one 84 stroke
+# matches it. Matches the UNIFORM style of S/C/G/J and lowercase — one brush, one width.
+advance 765
+stroke 84
+# round bowl on the median ring (median = Noto's OUTER edge minus 42, so stroking 84
+# lands ours on Noto's outline; Noto's side stroke is a touch heavier than 84 so the
+# counter reads marginally more open — correct for our ONE-width brush)
+ellipse 383 350 281 319
+# diagonal tail: median line springing from the lower-right ring (~5 o'clock, on the
+# median so the stroke unions with the ring without poking the counter) down to a blunt
+# tip below the baseline.
+M 438 18
+L 575 -131

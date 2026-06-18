@@ -1,0 +1,16 @@
+# h — U+0068. Stroked centerline (uniform brush 84) — our own outline on Noto's
+# gridpoints, not a copy of Noto's curve data. Left ASCENDER stem + humanist
+# shoulder arch over to a right stem (same arch family as 'n'). Medians midway
+# between Noto's outer/inner edges: left stem ctr x126.5 (outer 83 / inner 170),
+# right stem ctr x483.5 (inner 441 / outer 526), arch apex (329, ~499) (outer
+# 334,534 / inner 324,463), arch springs left ~405, joins right stem ~339.
+# Ascender top 745, baseline 0. Renderer uses BUTT caps, so stem endpoints sit on
+# the exact edges (0 and 745) — the flat cap then lands on Noto's flat top/foot.
+advance 605
+stroke 84
+M 126.5 0
+L 126.5 745
+M 126.5 402
+C 126.5 449 258 491 338 491
+C 428 491 483.5 435 483.5 344
+L 483.5 0

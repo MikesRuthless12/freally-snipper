@@ -1,0 +1,13 @@
+# y — U+0079. Stroked centerline single-storey 'y'. Two diagonal arms meet in a V
+# just below the baseline (junction ~253,-17); the right arm continues into a
+# descender tail that sweeps down-left. Centerlines run ~42 inside Noto's outer
+# edges so stroking at 84 lands ours on Noto's outline. stroke 84.
+advance 499
+stroke 84
+# left arm: top-left terminal down to the V junction
+M 47 525
+L 253 -17
+# right arm + descender tail: top-right terminal -> junction -> sweeping tail
+M 454 525
+L 253 -17
+C 214 -112 146 -193 44 -190

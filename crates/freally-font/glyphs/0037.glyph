@@ -1,0 +1,12 @@
+# 7 — U+0037 seven. OUR OWN uniform-width stroked centerline (stroke 84), reconstructed
+# to sit on Noto's shape on the grid (NOT a copy of Noto's curve data). Reverse-engineered
+# Noto's outline: top bar outer x[43..513] y[622..700] -> median y~658; diagonal right edge
+# (513,633)->(228,0), left edge (421,622)->(133,0) -> median line from the top-right joint
+# down to the foot at baseline. ONE brush, width 84, matching S/C/o. Advance = Noto (560).
+advance 560
+stroke 84
+# bar left terminal -> top-right joint
+M 85 658
+L 481 658
+# top-right joint -> diagonal foot at the baseline
+L 188 22

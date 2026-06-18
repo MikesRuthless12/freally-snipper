@@ -1,0 +1,11 @@
+# s — U+0073. Curves the ENTIRE way: terminals now curve continuously into the cap (like
+# the c) instead of going flat/horizontal first, so there is no down-then-up or up-then-down
+# wiggle at either end. Vertical tangents at both waists keep the spine a true S. stroke 84.
+advance 469
+stroke 84
+M 400 465
+C 366 486 300 500 244 500
+C 188 500 91 458 91 398
+C 91 330 384 210 384 141
+C 384 70 318 26 217 26
+C 120 26 90 46 51 63
