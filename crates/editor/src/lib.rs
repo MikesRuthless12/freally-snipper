@@ -1431,7 +1431,10 @@ impl EditorSession {
                     0.0
                 }
             };
-            let d = egui::vec2(axis(b.min.x, b.max.x, size.x), axis(b.min.y, b.max.y, size.y));
+            let d = egui::vec2(
+                axis(b.min.x, b.max.x, size.x),
+                axis(b.min.y, b.max.y, size.y),
+            );
             obj.translate(d);
         } else {
             obj.a.x = obj.a.x.clamp(0.0, size.x);
@@ -2274,25 +2277,25 @@ impl EditorSession {
                                     // Render each entry as a colour bitmap via swash
                                     // (egui's own fonts are monochrome), and skip any
                                     // glyph the font can't render — no tofu/missing.
-                                    let tex = self.emoji_textures.entry(glyph).or_insert_with(|| {
-                                        let bytes = font.as_ref()?;
-                                        let img = emoji::rasterize(bytes, glyph)?;
-                                        Some(ctx.load_texture(
-                                            format!("freally_emoji_{glyph}"),
-                                            egui::ColorImage::from_rgba_unmultiplied(
-                                                [img.width() as usize, img.height() as usize],
-                                                img.as_raw(),
-                                            ),
-                                            egui::TextureOptions::LINEAR,
-                                        ))
-                                    });
+                                    let tex =
+                                        self.emoji_textures.entry(glyph).or_insert_with(|| {
+                                            let bytes = font.as_ref()?;
+                                            let img = emoji::rasterize(bytes, glyph)?;
+                                            Some(ctx.load_texture(
+                                                format!("freally_emoji_{glyph}"),
+                                                egui::ColorImage::from_rgba_unmultiplied(
+                                                    [img.width() as usize, img.height() as usize],
+                                                    img.as_raw(),
+                                                ),
+                                                egui::TextureOptions::LINEAR,
+                                            ))
+                                        });
                                     if let Some(tex) = tex {
-                                        let btn = egui::Button::image(
-                                            egui::load::SizedTexture::new(
+                                        let btn =
+                                            egui::Button::image(egui::load::SizedTexture::new(
                                                 tex.id(),
                                                 egui::vec2(26.0, 26.0),
-                                            ),
-                                        );
+                                            ));
                                         if ui.add(btn).on_hover_text(name).clicked() {
                                             pick = Some(glyph.to_owned());
                                         }
@@ -2769,12 +2772,21 @@ mod tests {
         // how far the user tried to drag it.
         let small = egui::vec2(20.0, 20.0);
         let centered = egui::vec2((800.0 - 20.0) * 0.5, (600.0 - 20.0) * 0.5);
-        assert_eq!(clamp_offset(egui::vec2(-1000.0, -1000.0), small, avail), centered);
-        assert_eq!(clamp_offset(egui::vec2(5000.0, 5000.0), small, avail), centered);
+        assert_eq!(
+            clamp_offset(egui::vec2(-1000.0, -1000.0), small, avail),
+            centered
+        );
+        assert_eq!(
+            clamp_offset(egui::vec2(5000.0, 5000.0), small, avail),
+            centered
+        );
         // Larger-than-canvas image: pannable, but an edge can't cross the viewport
         // edge — offset clamped to [span - size, 0] per axis (no empty gutter).
         let big = egui::vec2(1000.0, 900.0);
-        assert_eq!(clamp_offset(egui::vec2(500.0, 500.0), big, avail), egui::vec2(0.0, 0.0));
+        assert_eq!(
+            clamp_offset(egui::vec2(500.0, 500.0), big, avail),
+            egui::vec2(0.0, 0.0)
+        );
         assert_eq!(
             clamp_offset(egui::vec2(-5000.0, -5000.0), big, avail),
             egui::vec2(800.0 - 1000.0, 600.0 - 900.0),

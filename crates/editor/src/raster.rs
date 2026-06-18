@@ -143,8 +143,11 @@ pub fn fill_triangle(
     for y in miny..maxy {
         for x in minx..maxx {
             let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
-            let (w0, w1, w2) =
-                (edge(p1, p2, px, py), edge(p2, p0, px, py), edge(p0, p1, px, py));
+            let (w0, w1, w2) = (
+                edge(p1, p2, px, py),
+                edge(p2, p0, px, py),
+                edge(p0, p1, px, py),
+            );
             let inside = if area > 0.0 {
                 w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0
             } else {
@@ -536,7 +539,10 @@ mod tests {
         );
         // The band background is tinted (a visible highlight)...
         let bg = img.get_pixel(2, 6).0;
-        assert!(bg != [255, 255, 255, 255], "band background should be highlighted");
+        assert!(
+            bg != [255, 255, 255, 255],
+            "band background should be highlighted"
+        );
         // ...while the dark text shows through crisply (spared / untouched).
         assert_eq!(
             img.get_pixel(5, 6).0,
