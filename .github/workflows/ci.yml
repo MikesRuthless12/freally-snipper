@@ -38,6 +38,7 @@ jobs:
             libxkbcommon-dev libxkbcommon-x11-dev \
             libssl-dev \
             libasound2-dev \
+            libv4l-dev \
             libdbus-1-dev \
             libclang-dev \
             libpipewire-0.3-dev \

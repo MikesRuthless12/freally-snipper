@@ -1,10 +1,13 @@
 [package]
 name = "freally-video"
-description = "Owned video codec + light video editor for Freally Snipper. Placeholder for Phase 5/6."
+description = "freally-video — the owned, dependency-free, patent-safe video codec for Freally Snipper."
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license-file.workspace = true
 publish = false
 
+# Intentionally has NO dependencies: `freally-video` is built only from
+# expired-patent / public-domain techniques (a QOI-class intra codec + tile
+# delta + RLE/Huffman), so it is 100% owned and patent-safe.
 [dependencies]

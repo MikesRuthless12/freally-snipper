@@ -60,6 +60,29 @@ Transitive Rust dependencies are MIT / Apache-2.0 / BSD / Zlib / MPL. Verify the
 Downloads are over TLS from the hosts above; the MADLAD weights are pinned to an immutable
 revision. See [`SECURITY.md`](SECURITY.md) for the download-integrity posture.
 
+## Phase 5 — video capture (recording / audio / webcam / export)
+
+**Bundled (compiled in):**
+
+| Component | Role | License |
+|-----------|------|---------|
+| [`cpal`](https://crates.io/crates/cpal) | system-loopback + microphone audio capture (recording) | Apache-2.0 |
+| [`nokhwa`](https://crates.io/crates/nokhwa) | webcam capture (recording picture-in-picture); native per-OS backend | Apache-2.0 OR MIT |
+| [`image`](https://crates.io/crates/image) (`gif` feature) | in-process animated-GIF export | MIT OR Apache-2.0 |
+| [`ffmpeg-sidecar`](https://crates.io/crates/ffmpeg-sidecar) | locate / download + drive ffmpeg as a subprocess (export only) | MIT OR Apache-2.0 |
+
+**Run as a separate process, downloaded on demand (NOT bundled, NOT linked):**
+
+| Component | Role | License |
+|-----------|------|---------|
+| [ffmpeg](https://ffmpeg.org) | optional **MP4 / WebM** video export | LGPL / GPL (the standalone binary's own license) |
+
+`freally-video` (`.fvid`) is the **owned, default** record format, and **GIF** export is in-process.
+ffmpeg is used **only** for optional MP4/WebM export — it is **not linked** into Freally Snipper but
+**invoked as a standalone subprocess** (fetched on first use to a per-user cache), so its GPL/LGPL
+stays with that separate binary and does not affect Freally Snipper's proprietary license. See
+[`SECURITY.md`](SECURITY.md) for the ffmpeg-download trust note.
+
 ## Planned components (later phases — listed now for licensing clarity)
 
 | Component | Role | License | Notes |
@@ -74,10 +97,13 @@ revision. See [`SECURITY.md`](SECURITY.md) for the download-integrity posture.
 
 ## Codec / patent note
 
-H.264 and AAC are **patent-encumbered**. Freally Snipper defaults to its own **`freally-video`**
-codec, built only from expired-patent / public-domain techniques. The optional ffmpeg export
-defaults to **royalty-free VP9 / Opus / WebM** (and VP8); H.264/MP4 is offered only where the
-bundled ffmpeg build's license permits.
+H.264 (AVC) and AAC are **patent-pooled** (Via LA). Freally Snipper's owned **`freally-video`** codec
+uses only expired-patent / public-domain techniques, and its **GIF** and **WebM (VP9 / Opus)** exports
+are **royalty-free**. **MP4 (H.264/AAC)** export is offered for compatibility; those codecs' patents
+are the owner's accepted responsibility as the distributor. All MP4/WebM encoding is performed by
+**ffmpeg as a separate subprocess** (not linked into the app), downloaded on demand rather than
+bundled. (A from-scratch H.264 encoder would **not** avoid these patents — they cover the format's
+techniques, not the code — so it is revisited only once the AVC patents fully expire.)
 
 ## Owned components (not third-party)
 

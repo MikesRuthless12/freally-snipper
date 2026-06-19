@@ -159,6 +159,9 @@ pub fn language_label(code: &str) -> &str {
 /// How many recent captures the home-window gallery remembers (P2.2).
 pub const MAX_RECENT: usize = 24;
 
+/// Selectable screen-recording frame rates (P5.1).
+pub const RECORD_FPS_OPTIONS: &[u32] = &[15, 24, 30, 60];
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -191,6 +194,14 @@ pub struct Settings {
     /// Opt-in: launch at sign-in, minimized to the tray (P4.10). A per-user
     /// autostart entry (not an OS service); reversible.
     pub start_at_login: bool,
+    /// Screen-recording frame rate (P5.1).
+    pub record_fps: u32,
+    /// Capture system/loopback audio ("what you hear") while recording (P5.2).
+    pub record_system_audio: bool,
+    /// Capture the microphone while recording (P5.2).
+    pub record_microphone: bool,
+    /// Overlay the webcam as a picture-in-picture while recording (P5.2).
+    pub record_webcam: bool,
     /// Windows-only memory of the prior Print-Screen registry value, so the
     /// override can be cleanly reverted. `None` means we have not changed it.
     pub print_screen_prior: Option<PrtScPrior>,
@@ -213,6 +224,10 @@ impl Default for Settings {
             open_with_print_screen: false,
             minimize_to_tray: false,
             start_at_login: false,
+            record_fps: 30,
+            record_system_audio: true,
+            record_microphone: false,
+            record_webcam: false,
             print_screen_prior: None,
             recent_captures: Vec::new(),
         }
@@ -295,6 +310,10 @@ mod tests {
             open_with_print_screen: true,
             minimize_to_tray: true,
             start_at_login: true,
+            record_fps: 60,
+            record_system_audio: false,
+            record_microphone: true,
+            record_webcam: true,
             print_screen_prior: Some(PrtScPrior::Value(1)),
             recent_captures: vec![PathBuf::from("/tmp/snips/a.png")],
         };

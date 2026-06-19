@@ -61,6 +61,22 @@ remediate before any public disclosure.
   host, not the bytes. The translate add-on loads weights via one **`unsafe` memory-map** (required by
   `candle`) of a file the app just wrote into its own cache; the rest of the editor crate, and the
   whole app binary, remain `#![forbid(unsafe_code)]`.
+- **Video capture (Phase 5):** screen recording, the recorded `.fvid` file, and the optional
+  **system-audio / microphone / webcam** capture all stay **on your machine** — nothing is uploaded.
+  Microphone and webcam capture are **opt-in** (off by default) and used only to produce your
+  recording; recordings are written to your chosen folder via a `<name>.part` temp plus an atomic
+  rename. **Decode hardening:** because a `.fvid` can come from an untrusted source, the decoder
+  **bounds every allocation derived from a file field** (dimensions, frame count, block lengths, the
+  Huffman symbol count) so a malformed or hostile recording fails cleanly instead of exhausting
+  memory; the codec is `#![forbid(unsafe_code)]`, so there is no memory-unsafety surface.
+  - **Optional video export (ffmpeg):** MP4/WebM export runs **ffmpeg as a separate subprocess** (the
+    owned `freally-video` and GIF paths need no external tool), with paths passed as an argv vector
+    (no shell). ffmpeg is **downloaded on demand** (via `ffmpeg-sidecar`) to a per-user cache and then
+    executed. **Honest trust note:** that download is **not yet integrity-pinned** (unlike the Phase 4
+    model downloads) — it fetches an **executable** from a third-party host, so a compromised host or
+    MITM is a code-execution risk. The feature is optional and clearly labeled; **tracked hardening:**
+    pin/verify the ffmpeg download. The temporary WAV used to mux audio is written to the OS temp dir
+    under a per-process-unique name and removed after the export.
 - **Third-party components** (see [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) carry their own
   advisories; we track and update them, and intend to run `cargo audit` / `cargo deny` in CI as the
   project matures.

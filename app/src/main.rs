@@ -11,15 +11,20 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod audio;
 mod autostart;
 mod delivery;
+mod export;
 mod gallery;
 mod hotkey;
 mod output;
 mod overlay;
+mod player;
 mod print_screen;
+mod recorder;
 mod settings;
 mod tray;
+mod webcam;
 
 use eframe::egui;
 

@@ -5,14 +5,13 @@ for **Windows, macOS, and Linux** — in the spirit of the Windows 11 Snipping T
 ScreenToGif, but **free, local-first, and privacy-respecting** (no accounts, no cloud, no
 telemetry).
 
-> **Status:** Phase 4 (Image editor) — a full **WYSIWYG editor** on a zoom/pan canvas: pen / brush /
-> highlighter (free + text-aware) / two-mode eraser, movable **shapes / text / watermark / placed
-> images / colour emoji**, live **filters** and **transforms**, an eyedropper, **Extract Text (OCR)**,
-> and **on-device translation** of text objects into ~400 languages via a type-to-filter language
-> picker — *Save writes exactly what you see*. Plus **start-at-login** (minimized to the tray) and an
-> in-app **Models** panel that downloads each optional model on demand with a live progress bar
-> (% · amount of total · MB/s). Builds on the Phase 3 capture overlay, the Phase 2 home window, the
-> Phase 1 capture core, and the Phase 0 foundation.
+> **Status:** Phase 5 (Video capture) — **screen recording** of a region / window / full screen to the
+> **owned `freally-video` (`.fvid`) format**, with **attach-and-follow a window**, a recording bar
+> (pause / resume / stop), **system + microphone audio**, and an optional **webcam picture-in-picture**.
+> Recordings **play back in-app** through the owned decoder, and **export** to **GIF** (built-in),
+> **WebM (VP9/Opus)**, or **MP4 (H.264/AAC)** via ffmpeg. Any resolution, **including 4K** — the
+> streaming encoder keeps memory bounded. Builds on the Phase 4 image editor, the Phase 3 capture
+> overlay, the Phase 2 home window, the Phase 1 capture core, and the Phase 0 foundation.
 
 > **🔒 No bundled AI models — full transparency.** Capture and image/video editing work **100%
 > offline**. The **optional** speech-to-text, translation, and dubbing features use third-party AI
@@ -45,9 +44,10 @@ public issue).
     libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
     libxcb1-dev libxrandr-dev \
     libxkbcommon-dev libxkbcommon-x11-dev \
-    libssl-dev libasound2-dev libdbus-1-dev \
+    libssl-dev libasound2-dev libv4l-dev libdbus-1-dev \
     libclang-dev libpipewire-0.3-dev libwayland-dev libegl-dev
   ```
+  (`libasound2-dev` + `libv4l-dev` are for recording audio + webcam in Phase 5.)
 
 ## Build & run
 
@@ -91,6 +91,33 @@ exactly what you see** (Save / Copy / Discard, Undo / Redo):
 The OCR, colour-emoji, and translation models aren't bundled — the **Models** panel downloads each on
 demand with a live progress bar (% · amount of total · MB/s). See
 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
+
+## Recording video
+
+Click **Video** on the home toolbar (or **Video** on the capture overlay's action bar), then pick a
+**region**, a **window**, or the **full screen** — the same selection modes as a snip. Recording
+starts and a small always-on-top bar shows **● REC**, the elapsed time, and **Pause / Resume / Stop**;
+on **Stop** the clip is saved as a **`.fvid`** in your save folder and appears in **Recent captures**.
+
+- **Attach to a window** — record one app window and **follow it** as it moves or resizes.
+- **Audio** — capture **system audio** ("what you hear") and/or your **microphone** (Settings →
+  Recording). System audio is WASAPI loopback on Windows and a PipeWire/PulseAudio monitor on Linux;
+  on macOS it needs a virtual device (e.g. BlackHole). Best-effort — recording continues silently if a
+  source can't open.
+- **Webcam PiP** — optionally overlay your camera in the corner of the recording.
+- **Frame rate** — 15 / 24 / 30 / 60 fps. Any resolution, **including 4K**; the owned codec is
+  lossless, so very high frame rates at 4K may not sustain on every machine, but playback always
+  stays the right length.
+
+**Play back** a recording by clicking it in **Recent captures** — it opens in the in-app player
+(Play / Pause / Loop), decoded entirely through the owned `freally-video` path. From the player,
+**Export ▾** writes an **animated GIF** (built-in, no dependency) or, via **ffmpeg** (fetched on first
+use and run as a separate process), **WebM (VP9/Opus)** or **MP4 (H.264/AAC)**.
+
+> **Owned vs. optional.** `freally-video` (`.fvid`) is the **owned, default** record format. GIF and
+> WebM/VP9/Opus export are **royalty-free**; **MP4 (H.264/AAC)** uses patent-pooled codecs. ffmpeg is
+> **not bundled** — it's downloaded on demand and run as a standalone subprocess. See
+> [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) and [`EULA.md`](EULA.md).
 
 ## Develop
 
