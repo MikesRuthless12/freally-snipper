@@ -10,17 +10,30 @@ publish = false
 [dependencies]
 freally-capture = { path = "../crates/capture" }
 freally-editor = { path = "../crates/editor" }
+freally-video = { path = "../crates/video" }
 directories = "6.0.0"
 eframe = "0.34.3"
 image = { version = "0.25.10", default-features = false, features = [
     "png",
     "jpeg",
     "bmp",
+    "gif",
 ] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 global-hotkey = "0.8.0"
 arboard = "3.6.1"
+# System/loopback + mic audio capture for screen recording (P5.2). Optional,
+# clearly-labeled, behind the audio module; graceful fallback when unavailable.
+cpal = "0.15.3"
+# Webcam capture for the recording PiP (P5.2), behind the webcam module; native
+# per-OS backend (MediaFoundation / AVFoundation / V4L2). Graceful fallback.
+nokhwa = { version = "0.10", features = ["input-native"] }
+# Optional, non-owned video EXPORT (P5.1) — runs ffmpeg as a SEPARATE subprocess
+# (no linking, so the proprietary app stays at arm's length from ffmpeg's
+# GPL/LGPL; only the standalone binary carries that license). WebM is royalty-free;
+# MP4/H.264 is patent-pooled (owner accepts). GIF export is in-process (no ffmpeg).
+ffmpeg-sidecar = "2.0"
 rfd = "0.17.2"
 opener = "0.7.2"
 chrono = { version = "0.4.42", default-features = false, features = ["clock", "std"] }

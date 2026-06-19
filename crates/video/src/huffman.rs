@@ -199,7 +199,11 @@ pub(crate) fn decompress(blob: &[u8]) -> Option<Vec<u8>> {
     }
 
     let mut reader = BitReader::new(bitstream);
-    let mut out = Vec::with_capacity(count);
+    // Each decoded symbol consumes at least one bit, so the output can't exceed
+    // `bitstream.len() * 8` symbols — cap the reservation by that so a hostile
+    // `count` (up to u64::MAX) can't pre-allocate unbounded memory. The decode
+    // loop still terminates early via `read_bit()? -> None` when the bits run out.
+    let mut out = Vec::with_capacity(count.min(bitstream.len().saturating_mul(8)));
     for _ in 0..count {
         let mut code = 0u32;
         let mut len = 0usize;

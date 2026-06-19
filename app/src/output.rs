@@ -42,7 +42,7 @@ pub fn save_capture(
         ImageFormat::Bmp => ("bmp", ::image::ImageFormat::Bmp),
     };
 
-    let path = unique_path(folder, ext);
+    let path = unique_path(folder, "Freally Snip", ext);
 
     // JPEG has no alpha channel. Don't just drop alpha (that would leak the
     // masked-out pixels of a Freeform crop back in as a full rectangle) — instead
@@ -79,10 +79,16 @@ fn unix_millis() -> u128 {
         .unwrap_or(0)
 }
 
-/// A non-colliding path in `folder`: `Freally Snip <ms>.<ext>`, with a ` (n)`
-/// suffix if two captures land in the same millisecond (so neither is lost).
-fn unique_path(folder: &Path, ext: &str) -> PathBuf {
-    let base = format!("Freally Snip {}", unix_millis());
+/// A non-colliding `.fvid` recording path in `folder`
+/// (`Freally Recording <ms>.fvid`).
+pub fn recording_path(folder: &Path) -> PathBuf {
+    unique_path(folder, "Freally Recording", "fvid")
+}
+
+/// A non-colliding path in `folder`: `<prefix> <ms>.<ext>`, with a ` (n)` suffix
+/// if two outputs land in the same millisecond (so neither is lost).
+fn unique_path(folder: &Path, prefix: &str, ext: &str) -> PathBuf {
+    let base = format!("{prefix} {}", unix_millis());
     let mut path = folder.join(format!("{base}.{ext}"));
     let mut n = 1;
     while path.exists() {

@@ -11,6 +11,27 @@ Work begins on **freally-font** — Freally's own original typeface, which will 
 ### Added
 - **freally-font** (new `crates/freally-font`) — the full **English** set (A–Z, a–z, 0–9) as 100%-original uniform-stroke glyphs, data-driven (one `.glyph` file per codepoint) with a specimen / overlay / metrics renderer for design calibration; proprietary, built from original outlines (no third-party glyph data).
 
+## [0.60.0] — 2026-06-19 — Video capture
+
+Screen recording to the owned `freally-video` format — with audio, an optional webcam, in-app playback, and export to GIF / WebM / MP4.
+
+### Added
+- **Record** a region, a window (and **follow it** as it moves/resizes), or the full screen to a `.fvid`; a small always-on-top bar shows the REC time with **Pause / Resume / Stop**. Any resolution, including 4K.
+- **`freally-video` streaming codec** — each frame encodes straight to disk, so long/4K recordings stay memory-bounded; the output is byte-identical to the batch codec.
+- **Audio** — capture system/loopback ("what you hear") and/or the **microphone**, mixed into the recording (Settings → Recording).
+- **Webcam** picture-in-picture overlay (optional, bottom-right).
+- **Playback** — click a recording in Recent captures to play it (Play / Pause / Loop) entirely through the owned decoder.
+- **Export ▾** from the player — animated **GIF** (built-in, no dependency), or **WebM (VP9/Opus)** / **MP4 (H.264/AAC)** via ffmpeg (fetched on first use, run as a separate process).
+- A **DRAFT EULA + Privacy Policy** in the About panel (acceptable-use, your-content-is-yours, no-telemetry).
+
+### Changed
+- The **Video** button (home toolbar + capture bar) now records instead of being a placeholder.
+- Recordings stream to a `.part` file and rename on stop; quitting mid-record still finalizes the file.
+- Version bumped to 0.60.0 — the Phase 5 step on the ladder to v1.0.0.
+
+### Notes
+- `freally-video` (`.fvid`) is the **owned default**; GIF and WebM (VP9/Opus) export are royalty-free; MP4 uses patent-pooled H.264/AAC. ffmpeg is **not bundled** — it's downloaded on demand and run as a subprocess.
+
 ## [0.45.0] — 2026-06-17 — Image editor (Toolbar 2)
 
 A full WYSIWYG image editor — markup, text, shapes, emoji, filters, transforms, image-on-image, OCR, and on-device translation — plus start-at-login and an in-app model downloader.

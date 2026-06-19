@@ -17,11 +17,14 @@ use eframe::egui;
 use freally_capture::image::RgbaImage;
 use freally_capture::{Composite, Rect as VRect, WindowInfo};
 
+use crate::audio::AudioConfig;
 use crate::delivery::Delivery;
 use crate::gallery::Gallery;
 use crate::hotkey::Hotkeys;
-use crate::overlay::{apply_selection, OverlayOutcome, OverlaySession, Selection};
+use crate::overlay::{apply_selection, OverlayOutcome, OverlaySession, RecordGeom, Selection};
+use crate::player::{Player, PlayerOutcome};
 use crate::print_screen::{self, KeyOutcome};
+use crate::recorder::{RecordConfig, RecordTarget, Recorder};
 use crate::settings::{
     language_label, ImageFormat, Settings, SnippetMode, Theme, TimerDelay, UI_LANGUAGES,
 };
@@ -43,6 +46,8 @@ const TILE: f32 = 96.0;
 /// no runtime file lookup (works in the installed app too).
 const LICENSE_TEXT: &str = include_str!("../../LICENSE");
 const THIRD_PARTY_TEXT: &str = include_str!("../../THIRD-PARTY-NOTICES.md");
+const EULA_TEXT: &str = include_str!("../../EULA.md");
+const PRIVACY_TEXT: &str = include_str!("../../PRIVACY.md");
 
 /// Which home-window view is showing (toolbar is always visible above it).
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -94,6 +99,9 @@ enum CaptureState {
     Arming {
         mode: SnippetMode,
         since: Instant,
+        /// Whether the Video capture type is armed (a committed selection starts a
+        /// recording instead of a photo).
+        record: bool,
     },
     /// Selection overlay is live with a frozen snapshot.
     Active(Box<OverlaySession>),
@@ -119,6 +127,29 @@ enum CaptureState {
         since: Instant,
         markup: bool,
     },
+    /// A screen recording is in progress (P5.1): the window is a small always-on-top
+    /// control bar (REC · time · Pause · Stop) placed outside the recorded area.
+    Recording(Box<Recording>),
+    /// Playing back a saved `.fvid` recording (P5.1) in a decorated player window.
+    Playing(Box<Player>),
+}
+
+/// Live state for an in-progress screen recording (P5.1).
+struct Recording {
+    /// Handle to the background recorder thread.
+    recorder: Recorder,
+    /// The recorded area, in virtual-desktop pixels — places the control bar
+    /// outside the shot and labels the recording.
+    rect: VRect,
+    /// Whether this attaches to and follows a window (vs a fixed region).
+    follows_window: bool,
+    /// Latest elapsed time from the worker (excludes paused spans).
+    elapsed: Duration,
+    /// Whether the recording is currently paused.
+    paused: bool,
+    /// Set once Stop is requested, so the bar shows "Saving…" until the worker
+    /// reports the finished file.
+    stopping: bool,
 }
 
 impl FreallySnipperApp {
@@ -205,7 +236,7 @@ impl FreallySnipperApp {
     /// (hide settle) before the frozen snapshot. The Timer ▾ countdown — when set
     /// — runs *after* the selection, so the user picks the region first, then the
     /// screen is grabbed live after the delay.
-    fn begin_capture(&mut self, ctx: &egui::Context, mode: SnippetMode) {
+    fn begin_capture(&mut self, ctx: &egui::Context, mode: SnippetMode, record: bool) {
         if !matches!(self.capture, CaptureState::Idle) {
             return;
         }
@@ -220,6 +251,7 @@ impl FreallySnipperApp {
         self.capture = CaptureState::Arming {
             mode,
             since: Instant::now(),
+            record,
         };
         ctx.request_repaint();
     }
@@ -263,10 +295,24 @@ impl FreallySnipperApp {
         // Upload any thumbnails that finished decoding off-thread.
         self.gallery.pump(ctx);
 
+        // Reflect recording progress + finalize a finished recording (P5.1).
+        self.poll_recorder(ctx);
+
         // A global-hotkey press opens the overlay (only honored while idle).
         let hotkey_fired = self.hotkeys.as_ref().is_some_and(Hotkeys::take_fired);
         if hotkey_fired {
-            self.begin_capture(ctx, self.settings.default_snippet_mode);
+            self.begin_capture(ctx, self.settings.default_snippet_mode, false);
+        }
+
+        // Quit from the tray during a recording: stop + save, then quit once the
+        // recording is finalized (see `finish_recording`) — otherwise the Quit would
+        // queue behind the idle-gated handler below and appear to do nothing.
+        if let CaptureState::Recording(rec) = &mut self.capture {
+            if let Some(TrayCommand::Quit) = self.tray.as_ref().and_then(Tray::poll) {
+                rec.recorder.stop();
+                rec.stopping = true;
+                self.quitting = true;
+            }
         }
 
         // System tray (Windows/macOS): act on Open / Quit commands — but only while
@@ -301,8 +347,13 @@ impl FreallySnipperApp {
 
         match &self.capture {
             CaptureState::Idle => {}
-            CaptureState::Arming { mode, since } => {
+            CaptureState::Arming {
+                mode,
+                since,
+                record,
+            } => {
                 let mode = *mode;
+                let record = *record;
                 if since.elapsed() < HIDE_DELAY {
                     // Drive the wait with an unconditional repaint: the home window
                     // is hidden here, and a hidden eframe viewport does NOT reliably
@@ -311,7 +362,7 @@ impl FreallySnipperApp {
                     ctx.request_repaint();
                     return;
                 }
-                self.snapshot_after_arming(ctx, mode);
+                self.snapshot_after_arming(ctx, mode, record);
             }
             CaptureState::Active(_) => {
                 // Rendering + input happen in `ui`; just keep frames flowing.
@@ -352,26 +403,35 @@ impl FreallySnipperApp {
                 }
                 self.grab_live(ctx);
             }
+            CaptureState::Recording(_) => {
+                // The worker repaints on each progress update; keep a slow heartbeat
+                // so the elapsed clock stays live even between frames.
+                ctx.request_repaint_after(std::time::Duration::from_millis(250));
+            }
+            CaptureState::Playing(_) => {
+                // The player drives its own repaints while playing.
+            }
         }
     }
 
     /// After the hide settle: grab the frozen desktop, then either capture
     /// immediately (full screen, Timer Off), open the selection overlay, or — for
     /// full screen *with* a Timer — start the countdown to a live grab.
-    fn snapshot_after_arming(&mut self, ctx: &egui::Context, mode: SnippetMode) {
+    fn snapshot_after_arming(&mut self, ctx: &egui::Context, mode: SnippetMode, record: bool) {
         let timed = self.settings.timer_delay != TimerDelay::None;
         // Whether to open the editor after the capture — the persisted setting is
         // the starting point; the overlay's Markup button can flip it per-capture.
         let markup = self.settings.show_capture_editor;
-        // Full screen + Timer needs no frozen snapshot (there's no selection) —
-        // count down, then grab the live desktop. Skip the wasted full grab here.
-        if mode == SnippetMode::FullScreen && timed {
+        // Full screen + Timer (photo only) needs no frozen snapshot — count down,
+        // then grab the live desktop. Recording always goes through the overlay so
+        // the user commits a target (region / window / full screen).
+        if !record && mode == SnippetMode::FullScreen && timed {
             self.start_countdown(ctx, None, markup);
             return;
         }
         match capture_desktop() {
             Ok((composite, windows)) => {
-                if mode == SnippetMode::FullScreen {
+                if !record && mode == SnippetMode::FullScreen {
                     self.deliver_or_edit(ctx, composite.into_image(), markup);
                 } else {
                     let bounds = composite.bounds;
@@ -380,9 +440,10 @@ impl FreallySnipperApp {
                         composite,
                         mode,
                         windows,
-                        timed,
+                        timed && !record,
                         self.settings.active_color,
                         markup,
+                        record,
                     );
                     self.capture = CaptureState::Active(Box::new(session));
                     morph_to_overlay(ctx, bounds);
@@ -480,6 +541,8 @@ impl FreallySnipperApp {
             OverlayOutcome::Selected(selection) => {
                 self.start_countdown(&ctx, Some(selection), markup)
             }
+            // Video armed: begin recording the chosen geometry (P5.1).
+            OverlayOutcome::RecordTarget(geom) => self.start_recording(&ctx, geom),
         }
     }
 
@@ -560,6 +623,221 @@ impl FreallySnipperApp {
         restore_home(ctx, self.home_pos, !self.hidden_to_tray);
         self.status = Some(format!("Capture failed: {message}"));
         ctx.request_repaint();
+    }
+
+    /// Start a screen recording (P5.1) of the chosen geometry: spawn the recorder
+    /// worker and morph the window into a small control bar outside the recorded
+    /// area.
+    fn start_recording(&mut self, ctx: &egui::Context, geom: RecordGeom) {
+        let (rect, follows_window, target) = match geom {
+            RecordGeom::Rect(r) => (r, false, RecordTarget::Region(r)),
+            RecordGeom::Window { id, bounds } => (
+                bounds,
+                true,
+                RecordTarget::Window {
+                    id,
+                    initial: bounds,
+                },
+            ),
+        };
+
+        // Ensure the destination folder exists, then pick a unique .fvid path.
+        let folder = self.settings.save_folder.clone();
+        if let Err(err) = std::fs::create_dir_all(&folder) {
+            self.fail(ctx, format!("Couldn't create the save folder: {err}"));
+            return;
+        }
+        let output = crate::output::recording_path(&folder);
+
+        let recorder = Recorder::start(
+            ctx,
+            RecordConfig {
+                target,
+                fps: self.settings.record_fps,
+                output,
+                audio: AudioConfig {
+                    system: self.settings.record_system_audio,
+                    mic: self.settings.record_microphone,
+                },
+                webcam: self.settings.record_webcam,
+            },
+        );
+        self.capture = CaptureState::Recording(Box::new(Recording {
+            recorder,
+            rect,
+            follows_window,
+            elapsed: Duration::ZERO,
+            paused: false,
+            stopping: false,
+        }));
+        morph_to_record_bar(ctx, rect);
+        self.status = None;
+        ctx.request_repaint();
+    }
+
+    /// Poll the recorder for progress and finalize a finished recording.
+    fn poll_recorder(&mut self, ctx: &egui::Context) {
+        let mut finished: Option<std::result::Result<PathBuf, String>> = None;
+        if let CaptureState::Recording(rec) = &mut self.capture {
+            for update in rec.recorder.poll() {
+                if let Some(result) = update.finished {
+                    finished = Some(result);
+                } else {
+                    rec.elapsed = update.elapsed;
+                    rec.paused = update.paused;
+                }
+            }
+        }
+        if let Some(result) = finished {
+            self.finish_recording(ctx, result);
+        }
+    }
+
+    /// A finished recording: restore the home window and record the saved file
+    /// (or surface the error).
+    fn finish_recording(
+        &mut self,
+        ctx: &egui::Context,
+        result: std::result::Result<PathBuf, String>,
+    ) {
+        self.capture = CaptureState::Idle;
+        match result {
+            Ok(path) => {
+                self.status = Some(format!("Saved recording to {}", path.display()));
+                self.settings.push_recent(path);
+                self.persist();
+            }
+            Err(message) => self.status = Some(format!("Recording failed: {message}")),
+        }
+        // If the user chose Quit during the recording, quit now that it's saved.
+        if self.quitting {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        } else {
+            restore_home(ctx, self.home_pos, !self.hidden_to_tray);
+        }
+        ctx.request_repaint();
+    }
+
+    /// Draw the recording control bar (REC · elapsed · Pause/Resume · Stop) in the
+    /// small always-on-top window placed outside the recorded area.
+    fn recording_ui(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        // A close request (Alt+F4) while recording stops + saves, rather than quits.
+        let close = ui.input(|i| i.viewport().close_requested());
+        if close {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
+
+        // Snapshot the fields the UI needs, so the egui closures don't borrow `rec`.
+        let (paused, elapsed, rect, follows_window, stopping) = match &self.capture {
+            CaptureState::Recording(rec) => (
+                rec.paused,
+                rec.elapsed,
+                rec.rect,
+                rec.follows_window,
+                rec.stopping,
+            ),
+            _ => return,
+        };
+
+        let mut stop_clicked = false;
+        let mut pause_clicked = false;
+        egui::CentralPanel::default().show_inside(ui, |ui| {
+            ui.horizontal(|ui| {
+                // Blinking red dot (solid while paused).
+                let blink = paused || (elapsed.as_millis() / 500).is_multiple_of(2);
+                let (dot, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+                if blink {
+                    ui.painter().circle_filled(
+                        dot.center(),
+                        6.0,
+                        egui::Color32::from_rgb(229, 57, 53),
+                    );
+                }
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{}  {}",
+                        if paused { "Paused" } else { "REC" },
+                        format_hms(elapsed)
+                    ))
+                    .strong(),
+                );
+                let label = if follows_window {
+                    "window".to_owned()
+                } else {
+                    format!("{} × {}", rect.width, rect.height)
+                };
+                ui.label(egui::RichText::new(label).weak().small());
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add_enabled(!stopping, egui::Button::new("⏹ Stop"))
+                        .on_hover_text("Stop and save the recording")
+                        .clicked()
+                    {
+                        stop_clicked = true;
+                    }
+                    if ui
+                        .add_enabled(
+                            !stopping,
+                            egui::Button::new(if paused { "▶ Resume" } else { "⏸ Pause" }),
+                        )
+                        .on_hover_text("Pause / resume the recording")
+                        .clicked()
+                    {
+                        pause_clicked = true;
+                    }
+                });
+            });
+            if stopping {
+                ui.label(egui::RichText::new("Saving…").italics().weak());
+            }
+        });
+
+        // Apply the chosen action now that the egui borrows are released.
+        if let CaptureState::Recording(rec) = &mut self.capture {
+            if stop_clicked || close {
+                rec.recorder.stop();
+                rec.stopping = true;
+            } else if pause_clicked {
+                if rec.paused {
+                    rec.recorder.resume();
+                } else {
+                    rec.recorder.pause();
+                }
+            }
+        }
+    }
+
+    /// Open a saved `.fvid` recording in the in-app player (P5.1).
+    fn open_player(&mut self, ctx: &egui::Context, path: PathBuf) {
+        match Player::open(ctx, path) {
+            Ok(player) => {
+                self.home_pos = ctx
+                    .input(|i| i.viewport().outer_rect)
+                    .map(|r| r.min)
+                    .or(self.home_pos);
+                morph_to_editor(ctx);
+                self.capture = CaptureState::Playing(Box::new(player));
+                self.status = None;
+                ctx.request_repaint();
+            }
+            Err(message) => self.status = Some(format!("Couldn't play recording: {message}")),
+        }
+    }
+
+    /// Draw the `.fvid` player and act on a Close request (P5.1).
+    fn player_ui(&mut self, ui: &mut egui::Ui) {
+        let outcome = match &mut self.capture {
+            CaptureState::Playing(player) => player.ui(ui),
+            _ => return,
+        };
+        if matches!(outcome, PlayerOutcome::Close) {
+            let ctx = ui.ctx().clone();
+            self.capture = CaptureState::Idle;
+            restore_home(&ctx, self.home_pos, !self.hidden_to_tray);
+            ctx.request_repaint();
+        }
     }
 
     /// Draw the on-screen countdown badge (Timer ▾). Esc (or closing it) cancels
@@ -646,17 +924,22 @@ impl FreallySnipperApp {
                 .on_hover_text("Start a capture in the selected snippet mode (after the timer)")
                 .clicked()
             {
-                self.begin_capture(ctx, self.settings.default_snippet_mode);
+                self.begin_capture(ctx, self.settings.default_snippet_mode, false);
             }
             if ui
                 .button("Camera")
                 .on_hover_text("Take a screenshot (photo)")
                 .clicked()
             {
-                self.begin_capture(ctx, self.settings.default_snippet_mode);
+                self.begin_capture(ctx, self.settings.default_snippet_mode, false);
             }
-            ui.add_enabled(false, egui::Button::new("Video"))
-                .on_disabled_hover_text("Screen recording — arrives in Phase 5");
+            if ui
+                .button("Video")
+                .on_hover_text("Record the screen (region / window / full screen) to a .fvid")
+                .clicked()
+            {
+                self.begin_capture(ctx, self.settings.default_snippet_mode, true);
+            }
 
             ui.separator();
 
@@ -824,7 +1107,10 @@ impl FreallySnipperApp {
             });
 
         if let Some(path) = to_open {
-            if let Err(err) = opener::open(&path) {
+            if is_fvid(&path) {
+                let ctx = ui.ctx().clone();
+                self.open_player(&ctx, path);
+            } else if let Err(err) = opener::open(&path) {
                 self.status = Some(format!("Couldn't open {}: {err}", path.display()));
             }
         }
@@ -1036,6 +1322,71 @@ impl FreallySnipperApp {
                      (Save / Copy / Discard, Undo / Redo).",
                 );
 
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(6.0);
+                ui.heading("Recording");
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label("Frame rate");
+                    egui::ComboBox::from_id_salt("record_fps")
+                        .selected_text(format!("{} fps", self.settings.record_fps))
+                        .show_ui(ui, |ui| {
+                            for &fps in crate::settings::RECORD_FPS_OPTIONS {
+                                if ui
+                                    .selectable_value(
+                                        &mut self.settings.record_fps,
+                                        fps,
+                                        format!("{fps} fps"),
+                                    )
+                                    .changed()
+                                {
+                                    *dirty = true;
+                                }
+                            }
+                        });
+                });
+                let mut system_audio = self.settings.record_system_audio;
+                if ui
+                    .checkbox(&mut system_audio, "Capture system audio (what you hear)")
+                    .on_hover_text(
+                        "Record desktop/app sound. Windows: WASAPI loopback; Linux: a \
+                         PulseAudio/PipeWire monitor source; macOS needs a virtual device \
+                         (e.g. BlackHole). Best-effort — recording continues silently if it \
+                         can't open.",
+                    )
+                    .changed()
+                {
+                    self.settings.record_system_audio = system_audio;
+                    *dirty = true;
+                }
+                let mut microphone = self.settings.record_microphone;
+                if ui
+                    .checkbox(&mut microphone, "Capture microphone")
+                    .on_hover_text("Mix your microphone into the recording (e.g. to narrate).")
+                    .changed()
+                {
+                    self.settings.record_microphone = microphone;
+                    *dirty = true;
+                }
+                let mut webcam = self.settings.record_webcam;
+                if ui
+                    .checkbox(&mut webcam, "Overlay webcam (picture-in-picture)")
+                    .on_hover_text(
+                        "Show your camera in a small box in the bottom-right of the recording. \
+                         Best-effort — skipped if no camera is available.",
+                    )
+                    .changed()
+                {
+                    self.settings.record_webcam = webcam;
+                    *dirty = true;
+                }
+                ui.small(
+                    "Recordings save as .fvid (your own format) — click one in Recent captures \
+                     to play it. The owned codec is lossless, so very high frame rates at 4K may \
+                     not sustain on every machine; playback always stays the right length.",
+                );
+
                 ui.add_space(10.0);
                 let tray_available = self.tray.is_some();
                 let mut tray_on = self.settings.minimize_to_tray;
@@ -1235,6 +1586,22 @@ impl FreallySnipperApp {
                             ui.monospace(THIRD_PARTY_TEXT);
                         });
                 });
+                ui.collapsing("End User License Agreement", |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("eula_scroll")
+                        .max_height(260.0)
+                        .show(ui, |ui| {
+                            ui.monospace(EULA_TEXT);
+                        });
+                });
+                ui.collapsing("Privacy", |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("privacy_scroll")
+                        .max_height(260.0)
+                        .show(ui, |ui| {
+                            ui.monospace(PRIVACY_TEXT);
+                        });
+                });
             });
     }
 }
@@ -1251,6 +1618,10 @@ impl eframe::App for FreallySnipperApp {
             self.editor_ui(ui);
         } else if matches!(self.capture, CaptureState::Counting { .. }) {
             self.countdown_ui(ui);
+        } else if matches!(self.capture, CaptureState::Recording(_)) {
+            self.recording_ui(ui);
+        } else if matches!(self.capture, CaptureState::Playing(_)) {
+            self.player_ui(ui);
         } else {
             self.home_ui(ui);
         }
@@ -1435,6 +1806,65 @@ fn restore_home(ctx: &egui::Context, home_pos: Option<egui::Pos2>, show: bool) {
     if show {
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
     }
+}
+
+/// Size of the recording control bar window, in points.
+const RECORD_BAR_SIZE: egui::Vec2 = egui::vec2(340.0, 60.0);
+
+/// Reshape the single OS window into a small, borderless, always-on-top recording
+/// control bar, placed just outside the recorded `rect` so it stays out of the
+/// shot. For a full-screen recording there is no "outside", so it sits at the top.
+fn morph_to_record_bar(ctx: &egui::Context, rect: VRect) {
+    let ppp = ctx.pixels_per_point().max(0.1);
+    let (bw, bh) = (RECORD_BAR_SIZE.x, RECORD_BAR_SIZE.y);
+    let rect_x = rect.x as f32 / ppp;
+    let rect_y = rect.y as f32 / ppp;
+    let rect_w = rect.width as f32 / ppp;
+    let rect_bottom = rect.bottom() as f32 / ppp;
+    let margin = 8.0;
+    let mut x = rect_x + (rect_w - bw) * 0.5;
+    // Prefer just above the region; if there's no room, drop just below it.
+    let above = rect_y - bh - margin;
+    let mut y = if above >= 0.0 {
+        above
+    } else {
+        rect_bottom + margin
+    };
+    // Clamp fully on-screen so the bar (and its Stop button) is always reachable —
+    // e.g. a full-screen recording, where there is no room outside the rect.
+    if let Some(m) = ctx.input(|i| i.viewport().monitor_size) {
+        x = x.clamp(0.0, (m.x - bw).max(0.0));
+        y = y.clamp(0.0, (m.y - bh).max(0.0));
+    } else {
+        x = x.max(0.0);
+        y = y.max(0.0);
+    }
+    ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(false));
+    ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
+        egui::WindowLevel::AlwaysOnTop,
+    ));
+    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(RECORD_BAR_SIZE));
+    ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(x, y)));
+    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+}
+
+/// Format a duration as `M:SS` (or `H:MM:SS` past an hour) for the recording bar.
+fn format_hms(d: Duration) -> String {
+    let secs = d.as_secs();
+    let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
+}
+
+/// Whether `path` is one of our owned `.fvid` recordings (case-insensitive).
+fn is_fvid(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("fvid"))
 }
 
 /// Grab the whole desktop as a frozen composite plus the front-to-back window

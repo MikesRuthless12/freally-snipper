@@ -18,7 +18,7 @@ const TILE: u32 = 16;
 pub(crate) fn encode(prev: &[u8], cur: &[u8], width: u32, height: u32) -> (Vec<u8>, usize, usize) {
     let tiles_x = width.div_ceil(TILE);
     let tiles_y = height.div_ceil(TILE);
-    let total = (tiles_x * tiles_y) as usize;
+    let total = tiles_x as usize * tiles_y as usize;
 
     let mut dirty = vec![false; total];
     let mut dirty_count = 0;
@@ -72,7 +72,7 @@ pub(crate) fn decode(stream: &[u8], prev: &[u8], width: u32, height: u32) -> Opt
     }
     let tiles_x = width.div_ceil(tile);
     let tiles_y = height.div_ceil(tile);
-    let total = (tiles_x * tiles_y) as usize;
+    let total = tiles_x as usize * tiles_y as usize;
     let bitmap_len = total.div_ceil(8);
 
     let bitmap = stream.get(1..1 + bitmap_len)?;

@@ -46,10 +46,14 @@ mod inter;
 mod intra;
 mod pack;
 mod rle;
+mod stream;
 
+use std::io::Write;
 use std::path::Path;
 
 use bytes::{put_u16, put_u32, put_u64, Cursor};
+
+pub use stream::{read_audio_file, StreamDecoder, StreamEncoder};
 
 /// Identifier for this crate, surfaced in version banners and logs.
 pub const CRATE_NAME: &str = "freally-video";
@@ -72,6 +76,26 @@ const AUDIO_FORMAT_S16LE: u8 = 1;
 // Per-frame type tags.
 const FRAME_INTRA: u8 = 0;
 const FRAME_INTER: u8 = 1;
+
+/// Byte offset of the `frame_count` field within the container header — patched
+/// by the streaming encoder ([`StreamEncoder::finish`]) once a recording stops.
+pub(crate) const FRAME_COUNT_OFFSET: u64 = 24;
+
+/// Byte offset of the audio `sample count` field within the container header —
+/// patched by the streaming encoder when an audio track is finalized.
+pub(crate) const AUDIO_SAMPLES_OFFSET: u64 = 35;
+
+/// Size of the fixed container header, in bytes.
+pub(crate) const HEADER_LEN: usize = 43;
+
+/// Largest decoded frame, in bytes — bounds the memory a malformed or hostile
+/// `.fvid` can make the decoder allocate (8K RGBA is ~132 MiB, so 256 MiB leaves
+/// headroom while rejecting absurd dimensions). A decode-time DoS guard.
+pub(crate) const MAX_FRAME_BYTES: usize = 256 * 1024 * 1024;
+
+/// Largest packed frame/audio block accepted from a stream — a block can't exceed
+/// a frame's worth of data plus a little entropy-coder overhead.
+pub(crate) const MAX_BLOCK_BYTES: usize = MAX_FRAME_BYTES + 4096;
 
 /// Force a keyframe at least this often, so playback can resync and (later)
 /// seeking has anchor points.
@@ -202,28 +226,14 @@ impl Movie {
         self.validate()?;
 
         let mut out = Vec::new();
-        out.extend_from_slice(MAGIC);
-        put_u16(&mut out, FORMAT_VERSION);
-        put_u16(&mut out, if self.audio.is_some() { FLAG_AUDIO } else { 0 });
-        put_u32(&mut out, self.width);
-        put_u32(&mut out, self.height);
-        put_u32(&mut out, self.fps.num);
-        put_u32(&mut out, self.fps.den);
-        put_u32(&mut out, self.frames.len() as u32);
-        match &self.audio {
-            Some(a) => {
-                put_u32(&mut out, a.sample_rate);
-                put_u16(&mut out, a.channels);
-                out.push(AUDIO_FORMAT_S16LE);
-                put_u64(&mut out, a.samples.len() as u64);
-            }
-            None => {
-                put_u32(&mut out, 0);
-                put_u16(&mut out, 0);
-                out.push(0);
-                put_u64(&mut out, 0);
-            }
-        }
+        write_container_header(
+            &mut out,
+            self.width,
+            self.height,
+            self.fps,
+            self.frames.len() as u32,
+            self.audio.as_ref(),
+        );
 
         let mut prev: Option<&[u8]> = None;
         for (i, frame) in self.frames.iter().enumerate() {
@@ -284,7 +294,9 @@ impl Movie {
         let frame_bytes = rgba_len(width, height)?;
         let pixel_count = frame_bytes / 4;
 
-        let mut frames = Vec::with_capacity(frame_count as usize);
+        // Cap the reservation by the input size (a frame is ≥ 1 byte) so a header
+        // claiming billions of frames can't pre-allocate gigabytes.
+        let mut frames = Vec::with_capacity((frame_count as usize).min(data.len()));
         let mut prev: Option<Vec<u8>> = None;
         for _ in 0..frame_count {
             let ftype = cur.read_u8()?;
@@ -398,22 +410,65 @@ impl Movie {
     }
 }
 
+/// Write the fixed container header (magic, version, flags, dimensions, fps,
+/// frame count, audio descriptor). Shared by [`Movie::encode`] and the streaming
+/// [`StreamEncoder`] so both emit byte-identical headers.
+pub(crate) fn write_container_header(
+    out: &mut Vec<u8>,
+    width: u32,
+    height: u32,
+    fps: Rational,
+    frame_count: u32,
+    audio: Option<&AudioTrack>,
+) {
+    out.extend_from_slice(MAGIC);
+    put_u16(out, FORMAT_VERSION);
+    put_u16(out, if audio.is_some() { FLAG_AUDIO } else { 0 });
+    put_u32(out, width);
+    put_u32(out, height);
+    put_u32(out, fps.num);
+    put_u32(out, fps.den);
+    put_u32(out, frame_count);
+    match audio {
+        Some(a) => {
+            put_u32(out, a.sample_rate);
+            put_u16(out, a.channels);
+            out.push(AUDIO_FORMAT_S16LE);
+            put_u64(out, a.samples.len() as u64);
+        }
+        None => {
+            put_u32(out, 0);
+            put_u16(out, 0);
+            out.push(0);
+            put_u64(out, 0);
+        }
+    }
+}
+
 /// Append a `[type][u32 len][block]` record, checking the length fits a `u32`.
-fn write_block(out: &mut Vec<u8>, frame_type: u8, block: &[u8]) -> Result<()> {
+/// Generic over the sink so both the in-memory batch encoder (`Vec<u8>`) and the
+/// streaming encoder (a file) share it.
+pub(crate) fn write_block<W: Write>(out: &mut W, frame_type: u8, block: &[u8]) -> Result<()> {
     let len =
         u32::try_from(block.len()).map_err(|_| VideoError::InvalidData("frame block too large"))?;
-    out.push(frame_type);
-    put_u32(out, len);
-    out.extend_from_slice(block);
+    out.write_all(&[frame_type])?;
+    out.write_all(&len.to_le_bytes())?;
+    out.write_all(block)?;
     Ok(())
 }
 
-/// `width * height * 4`, with overflow rejected.
+/// `width * height * 4`, with overflow and absurd (hostile) sizes rejected.
 fn rgba_len(width: u32, height: u32) -> Result<usize> {
-    (width as usize)
+    let len = (width as usize)
         .checked_mul(height as usize)
         .and_then(|n| n.checked_mul(4))
-        .ok_or(VideoError::InvalidData("frame dimensions overflow"))
+        .ok_or(VideoError::InvalidData("frame dimensions overflow"))?;
+    if len > MAX_FRAME_BYTES {
+        return Err(VideoError::InvalidData(
+            "frame dimensions exceed the maximum",
+        ));
+    }
+    Ok(len)
 }
 
 fn samples_to_bytes(samples: &[i16]) -> Vec<u8> {
@@ -647,6 +702,26 @@ mod tests {
         assert!(matches!(
             Movie::decode(b"NOPE and some trailing bytes"),
             Err(VideoError::BadMagic)
+        ));
+    }
+
+    #[test]
+    fn decode_rejects_hostile_frame_count_without_oom() {
+        // A valid 43-byte header claiming ~4 billion frames, but no frame data:
+        // decode must error promptly rather than pre-allocating ~137 GB.
+        let mut bytes = Vec::new();
+        write_container_header(&mut bytes, 4, 4, Rational::new(30, 1), u32::MAX, None);
+        assert!(Movie::decode(&bytes).is_err());
+    }
+
+    #[test]
+    fn decode_rejects_absurd_dimensions() {
+        // 65535×65535×4 ≈ 17 GB — rejected before any allocation.
+        let mut bytes = Vec::new();
+        write_container_header(&mut bytes, 65535, 65535, Rational::new(30, 1), 1, None);
+        assert!(matches!(
+            Movie::decode(&bytes),
+            Err(VideoError::InvalidData(_))
         ));
     }
 

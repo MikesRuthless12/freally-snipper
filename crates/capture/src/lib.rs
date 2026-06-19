@@ -307,6 +307,38 @@ pub fn capture_rect(rect: Rect) -> Result<RgbaImage> {
     crop_composite(&comp, rect)
 }
 
+/// Capture a single virtual-desktop region efficiently — the per-frame path the
+/// screen recorder (P5.1) calls in a tight loop.
+///
+/// Most regions and windows sit on **one** monitor, so the fast path grabs just
+/// the monitor under the region's center and crops it — far cheaper than
+/// [`capture_rect`], which reads back *every* monitor each call. If the region
+/// spans monitors (or the single-monitor grab doesn't fully contain it), it falls
+/// back to the always-correct full capture + composite + crop.
+pub fn capture_region(rect: Rect) -> Result<RgbaImage> {
+    if rect.is_empty() {
+        return Err(CaptureError::EmptyRegion);
+    }
+    // Fast path: the monitor under the region's center, used only if it fully
+    // contains the region (verified against the *captured* bounds, so a scaled
+    // display can't slip through with a short crop).
+    let cx = rect.x.saturating_add(rect.width as i32 / 2);
+    let cy = rect.y.saturating_add(rect.height as i32 / 2);
+    if let Ok(monitor) = XcapMonitor::from_point(cx, cy) {
+        if let (Ok(mx), Ok(my)) = (monitor.x(), monitor.y()) {
+            if let Ok(image) = monitor.capture_image() {
+                let bounds = Rect::new(mx, my, image.width(), image.height());
+                if bounds.intersection(&rect) == Some(rect) {
+                    let comp = Composite { image, bounds };
+                    return crop_composite(&comp, rect);
+                }
+            }
+        }
+    }
+    // Fallback: region spans monitors (or the fast path failed) — always correct.
+    capture_rect(rect)
+}
+
 /// Enumerate visible top-level windows **front-to-back** (topmost first),
 /// skipping minimized and zero-area windows. Used by the "Window" capture mode:
 /// the window under the cursor is the first whose [`WindowInfo::bounds`] contain
@@ -340,6 +372,58 @@ pub fn list_windows() -> Result<Vec<WindowInfo>> {
 /// [`list_windows`]. A convenience for the overlay's hit-testing.
 pub fn window_at(windows: &[WindowInfo], x: i32, y: i32) -> Option<&WindowInfo> {
     windows.iter().find(|w| w.bounds.contains(x, y))
+}
+
+/// A held reference to one OS window, for the recorder's "attach to a window and
+/// **follow it**" mode (P5.1). Unlike [`WindowInfo`] (a one-shot snapshot), this
+/// keeps the backend handle, so [`bounds`](Self::bounds) reports the window's
+/// *current* geometry as it moves or resizes between frames.
+pub struct TrackedWindow {
+    inner: XcapWindow,
+}
+
+impl TrackedWindow {
+    /// Find the window with `id` (from a [`list_windows`] enumeration) and hold it
+    /// for tracking. Returns `Ok(None)` if no current window has that id.
+    pub fn find(id: u32) -> Result<Option<Self>> {
+        for w in XcapWindow::all()? {
+            if w.id().unwrap_or(0) == id {
+                return Ok(Some(Self { inner: w }));
+            }
+        }
+        Ok(None)
+    }
+
+    /// The window's current bounds in virtual-desktop pixels, or `None` if it is
+    /// minimized, closed, or its geometry can't be read (the recorder then holds
+    /// the last good bounds so a brief hiccup doesn't corrupt the recording).
+    pub fn bounds(&self) -> Option<Rect> {
+        if self.inner.is_minimized().unwrap_or(false) {
+            return None;
+        }
+        let (Ok(x), Ok(y), Ok(w), Ok(h)) = (
+            self.inner.x(),
+            self.inner.y(),
+            self.inner.width(),
+            self.inner.height(),
+        ) else {
+            return None;
+        };
+        if w == 0 || h == 0 {
+            return None;
+        }
+        Some(Rect::new(x, y, w, h))
+    }
+
+    /// The window title (best effort; may be empty).
+    pub fn title(&self) -> String {
+        self.inner.title().unwrap_or_default()
+    }
+
+    /// The owning application name (best effort; may be empty).
+    pub fn app_name(&self) -> String {
+        self.inner.app_name().unwrap_or_default()
+    }
 }
 
 #[cfg(test)]

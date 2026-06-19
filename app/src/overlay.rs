@@ -43,6 +43,18 @@ pub enum OverlayOutcome {
     /// later (after the countdown) — here is just the selection geometry, so the
     /// shot reflects how the screen looks *after* the delay.
     Selected(Selection),
+    /// User committed a target with the **Video** type armed: start a screen
+    /// recording of this geometry (P5.1) instead of taking a photo.
+    RecordTarget(RecordGeom),
+}
+
+/// Geometry for a screen **recording** (P5.1), returned when the Video capture
+/// type is armed on the action bar.
+pub enum RecordGeom {
+    /// A fixed region — rectangle, freeform bounding box, or full screen.
+    Rect(VRect),
+    /// A specific window to attach to and follow as it moves/resizes.
+    Window { id: u32, bounds: VRect },
 }
 
 /// A committed selection whose pixels are captured after a Timer countdown.
@@ -75,10 +87,17 @@ pub struct OverlaySession {
     /// straight away — toggled by the action bar's **Markup** button (P3.2),
     /// initialized from the persisted "show capture editor" setting.
     markup: bool,
+    /// Whether the **Video** capture type is armed: a committed selection starts a
+    /// screen recording (P5.1) instead of a photo. Toggled by the Camera/Video
+    /// buttons on the action bar.
+    record: bool,
 }
 
 impl OverlaySession {
     /// Upload the snapshot as a GPU texture and start a session in `mode`.
+    // Distinct knobs (mode, timer-defer, colour, markup, record) read clearer as
+    // positional args than wrapped in a one-off options struct.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: &egui::Context,
         composite: Composite,
@@ -87,6 +106,7 @@ impl OverlaySession {
         defer: bool,
         active_color: [u8; 4],
         markup: bool,
+        record: bool,
     ) -> Self {
         let size = [
             composite.image.width() as usize,
@@ -104,6 +124,7 @@ impl OverlaySession {
             defer,
             active_color,
             markup,
+            record,
         }
     }
 
@@ -248,11 +269,22 @@ impl OverlaySession {
             .show(ctx, |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        // Capture type: Camera (photo) is active today; Video is P5.
-                        ui.selectable_label(true, "Camera")
-                            .on_hover_text("Photo capture (screenshot)");
-                        ui.add_enabled(false, egui::Button::new("Video"))
-                            .on_disabled_hover_text("Screen recording arrives in Phase 5");
+                        // Capture type: Camera (photo) vs Video (record). Arming
+                        // Video makes a committed selection start a recording.
+                        if ui
+                            .selectable_label(!self.record, "Camera")
+                            .on_hover_text("Photo capture (screenshot)")
+                            .clicked()
+                        {
+                            self.record = false;
+                        }
+                        if ui
+                            .selectable_label(self.record, "Video")
+                            .on_hover_text("Screen recording (saves a .fvid you can play + export)")
+                            .clicked()
+                        {
+                            self.record = true;
+                        }
 
                         ui.separator();
 
@@ -366,7 +398,7 @@ impl OverlaySession {
                     self.draw_size_label(&painter, draw, sel);
                     if resp.drag_stopped() {
                         self.drag_start = None;
-                        return self.commit_rect(sel);
+                        return self.commit_rect_or_record(sel);
                     }
                 } else if let Some(p) = pointer {
                     self.draw_crosshair(&painter, draw, p);
@@ -377,15 +409,19 @@ impl OverlaySession {
             SnippetMode::Window => {
                 // Clamp the window rect to the desktop so the highlight matches
                 // the captured crop (maximized windows often sit a few px
-                // off-screen). Borrow only — no per-frame clone.
-                let hovered = pointer_v
+                // off-screen). Keep the window id too, for record-and-follow.
+                let hit = pointer_v
                     .and_then(|(vx, vy)| window_at(&self.windows, vx, vy))
-                    .and_then(|w| w.bounds.intersection(&self.composite.bounds));
-                if let Some(bounds) = hovered {
+                    .and_then(|w| {
+                        w.bounds
+                            .intersection(&self.composite.bounds)
+                            .map(|bounds| (w.id, bounds))
+                    });
+                if let Some((id, bounds)) = hit {
                     self.draw_bright_selection(&painter, draw, bounds);
                     self.draw_size_label(&painter, draw, bounds);
                     if resp.clicked() && !over_ui {
-                        return self.commit_rect(bounds);
+                        return self.commit_window_or_record(id, bounds);
                     }
                 }
                 self.draw_hint(&painter, draw, "Click a window  ·  Esc to cancel");
@@ -433,7 +469,7 @@ impl OverlaySession {
                     "Full screen  ·  Click or Enter to capture  ·  Esc to cancel",
                 );
                 if (resp.clicked() && !over_ui) || enter {
-                    return self.commit_rect(self.composite.bounds);
+                    return self.commit_rect_or_record(self.composite.bounds);
                 }
                 OverlayOutcome::Active
             }
@@ -498,6 +534,38 @@ impl OverlaySession {
         self.commit(Selection::Rect(r))
     }
 
+    /// Commit a rectangle as either a photo crop or, with Video armed, a record
+    /// target.
+    fn commit_rect_or_record(&self, r: VRect) -> OverlayOutcome {
+        if self.record {
+            self.commit_record(RecordGeom::Rect(r))
+        } else {
+            self.commit_rect(r)
+        }
+    }
+
+    /// Commit a clicked window as either a photo crop of its bounds or, with Video
+    /// armed, a record-and-follow target.
+    fn commit_window_or_record(&self, id: u32, bounds: VRect) -> OverlayOutcome {
+        if self.record {
+            self.commit_record(RecordGeom::Window { id, bounds })
+        } else {
+            self.commit_rect(bounds)
+        }
+    }
+
+    /// Finish a recording-target selection (size-checked).
+    fn commit_record(&self, geom: RecordGeom) -> OverlayOutcome {
+        let bounds = match &geom {
+            RecordGeom::Rect(r) => *r,
+            RecordGeom::Window { bounds, .. } => *bounds,
+        };
+        if bounds.width < 2 || bounds.height < 2 {
+            return OverlayOutcome::Active;
+        }
+        OverlayOutcome::RecordTarget(geom)
+    }
+
     fn commit_lasso(&mut self) -> OverlayOutcome {
         let path = std::mem::take(&mut self.lasso);
         let Some(bbox) = bounding_rect(&path) else {
@@ -505,6 +573,10 @@ impl OverlaySession {
         };
         if bbox.width < 2 || bbox.height < 2 {
             return OverlayOutcome::Active;
+        }
+        // Video can't record a lasso shape — record its bounding box instead.
+        if self.record {
+            return self.commit_record(RecordGeom::Rect(bbox));
         }
         self.commit(Selection::Freeform { bbox, path })
     }
