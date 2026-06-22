@@ -45,8 +45,6 @@ Transitive Rust dependencies are MIT / Apache-2.0 / BSD / Zlib / MPL. Verify the
 | [`swash`](https://crates.io/crates/swash) | colour-glyph (COLR/CBDT) rasterization for emoji | MIT OR Apache-2.0 |
 | [`emojis`](https://crates.io/crates/emojis) | emoji database for the searchable picker | MIT OR Apache-2.0 |
 | [`ocrs`](https://crates.io/crates/ocrs) + [`rten`](https://crates.io/crates/rten) | OCR engine ("Extract Text") — pure-Rust | MIT |
-| [`candle-core` / `-nn` / `-transformers`](https://github.com/huggingface/candle) | on-device ML runtime (T5 translate) | MIT OR Apache-2.0 |
-| [`tokenizers`](https://crates.io/crates/tokenizers) | SentencePiece tokenization (translate) | Apache-2.0 |
 | [`ureq`](https://crates.io/crates/ureq) | on-demand model/font downloads (rustls TLS) | MIT OR Apache-2.0 |
 
 **Downloaded on demand** (not bundled; fetched to the OS cache on first use):
@@ -55,10 +53,9 @@ Transitive Rust dependencies are MIT / Apache-2.0 / BSD / Zlib / MPL. Verify the
 |-----------|------|---------|
 | [ocrs models](https://github.com/robertknight/ocrs-models) (detection / recognition) | OCR (P4.6b) | Apache-2.0 |
 | [Noto Color Emoji](https://github.com/googlefonts/noto-emoji) | colour emoji rendering (P4.7) | SIL OFL 1.1 |
-| [MADLAD-400-3B-mt](https://huggingface.co/jbochi/madlad400-3b-mt) | machine translation, ~400 languages (P4.9) | Apache-2.0 |
 
-Downloads are over TLS from the hosts above; the MADLAD weights are pinned to an immutable
-revision. See [`SECURITY.md`](SECURITY.md) for the download-integrity posture.
+Downloads are over TLS from the hosts above. See [`SECURITY.md`](SECURITY.md) for the
+download-integrity posture.
 
 ## Phase 5 — video capture (recording / audio / webcam / export)
 
@@ -87,11 +84,7 @@ stays with that separate binary and does not affect Freally Snipper's proprietar
 
 | Component | Role | License | Notes |
 |-----------|------|---------|-------|
-| [Noto fonts](https://fonts.google.com/noto) | multilingual text & captions | SIL OFL 1.1 | bundled *as Noto* with attribution; free for commercial use |
-| [OpenAI Whisper](https://github.com/openai/whisper) + [whisper.cpp](https://github.com/ggerganov/whisper.cpp) / [`whisper-rs`](https://crates.io/crates/whisper-rs) | optional local speech-to-text | MIT | optional add-on; **manual captions are the owned default** |
-| [Silero VAD](https://github.com/snakers4/silero-vad) | voice-activity detection | MIT | optional |
-| Translation model ([M2M-100](https://github.com/facebookresearch/fairseq/tree/main/examples/m2m_100)) | translate captions to any language | MIT | optional; **avoid NLLB-200 (CC-BY-NC)** |
-| TTS / voice-clone ([Piper](https://github.com/rhasspy/piper); [OpenVoice](https://github.com/myshell-ai/OpenVoice) + [MeloTTS](https://github.com/myshell-ai/MeloTTS)) | audio dubbing | **MIT** | optional; **avoid Coqui XTTS (CPML)** |
+| [Noto fonts](https://fonts.google.com/noto) | multilingual text objects | SIL OFL 1.1 | bundled *as Noto* with attribution; free for commercial use |
 | [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) | text extraction + text-aware highlight | **Apache-2.0** | optional; local; multilingual lang-data on demand |
 | [ffmpeg](https://ffmpeg.org) via [`ffmpeg-sidecar`](https://crates.io/crates/ffmpeg-sidecar) | optional MP4/WebM export | **LGPL** (use the LGPL build; do **not** `--enable-gpl`) | optional convenience export; **`freally-video` is the default** |
 

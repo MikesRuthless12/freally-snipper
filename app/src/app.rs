@@ -1361,7 +1361,7 @@ impl FreallySnipperApp {
                     .checkbox(&mut show_editor, "Show the capture editor after capturing")
                     .on_hover_text(
                         "Open each capture in the image editor (Toolbar 2 — markup, text, shapes, \
-                         emoji, filters, transforms, OCR, and translation) instead of saving \
+                         emoji, filters, transforms, and OCR) instead of saving \
                          straight away. You can also toggle this per-capture with Markup on the \
                          capture bar.",
                     )

@@ -4,9 +4,8 @@
 //! audited place (filenames are hardcoded literals — no caller-supplied paths, so
 //! no traversal), and so the Models panel + the on-use download share one source.
 //!
-//! Integrity: downloads are over TLS from known hosts; the large MADLAD weights are
-//! pinned to an **immutable HF revision** (not a moving branch). Per-file SHA-256
-//! pinning is a tracked hardening item (see SECURITY.md).
+//! Integrity: downloads are over TLS from known hosts. Per-file SHA-256 pinning is
+//! a tracked hardening item (see SECURITY.md).
 
 use std::path::PathBuf;
 
@@ -35,11 +34,6 @@ const OCR_RECOGNITION: &str =
 // Noto Color Emoji (OFL).
 const EMOJI_FONT: &str =
     "https://github.com/googlefonts/noto-emoji/raw/main/fonts/NotoColorEmoji.ttf";
-// MADLAD-400-3B-mt (Apache-2.0) — pinned to an immutable repo revision (not a
-// moving branch) so the ~3 GB weights can't silently change under us.
-const MADLAD_CONFIG: &str = "https://huggingface.co/jbochi/madlad400-3b-mt/resolve/bb45f1851bf13a0b8f4fcd9ecadf2cdb7cf22439/config.json";
-const MADLAD_TOKENIZER: &str = "https://huggingface.co/jbochi/madlad400-3b-mt/resolve/bb45f1851bf13a0b8f4fcd9ecadf2cdb7cf22439/tokenizer.json";
-const MADLAD_WEIGHTS: &str = "https://huggingface.co/jbochi/madlad400-3b-mt/resolve/bb45f1851bf13a0b8f4fcd9ecadf2cdb7cf22439/model.safetensors";
 
 pub static OCR: Asset = Asset {
     id: "ocr",
@@ -69,29 +63,8 @@ pub static EMOJI: Asset = Asset {
     }],
 };
 
-pub static TRANSLATE: Asset = Asset {
-    id: "translate",
-    title: "Translation model (MADLAD-400)",
-    description: "Translates text into ~400 languages, fully on-device. Large download.",
-    subdir: "madlad400-3b-mt",
-    files: &[
-        AssetFile {
-            url: MADLAD_CONFIG,
-            name: "config.json",
-        },
-        AssetFile {
-            url: MADLAD_TOKENIZER,
-            name: "tokenizer.json",
-        },
-        AssetFile {
-            url: MADLAD_WEIGHTS,
-            name: "model.safetensors",
-        },
-    ],
-};
-
 /// All assets, for the Models panel.
-pub static ALL: &[&Asset] = &[&OCR, &EMOJI, &TRANSLATE];
+pub static ALL: &[&Asset] = &[&OCR, &EMOJI];
 
 fn cache_root() -> Result<PathBuf, String> {
     directories::ProjectDirs::from("com", "Havoc Software", "Freally Snipper")

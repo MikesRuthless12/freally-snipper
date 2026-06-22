@@ -40,7 +40,7 @@ Screen recording to the owned `freally-video` format — with audio, an optional
 
 ## [0.45.0] — 2026-06-17 — Image editor (Toolbar 2)
 
-A full WYSIWYG image editor — markup, text, shapes, emoji, filters, transforms, image-on-image, OCR, and on-device translation — plus start-at-login and an in-app model downloader.
+A full WYSIWYG image editor — markup, text, shapes, emoji, filters, transforms, image-on-image, and OCR — plus start-at-login and an in-app model downloader.
 
 ### Added
 - The editor opens in its own window on a zoom/pan canvas; **Save writes exactly what you see** (Save / Copy / Discard, Undo / Redo).
@@ -48,12 +48,12 @@ A full WYSIWYG image editor — markup, text, shapes, emoji, filters, transforms
 - Movable objects: rectangles / ovals / lines / arrows, **text + watermark** (size / font / opacity / colour), placed **image files**, and colour **emoji** — all selected, dragged, resized, and flattened only on Save.
 - Text shapes via rustybuzz + bundled Noto (incl. Arabic RTL); colour emoji via swash + Noto Color Emoji.
 - Live **filters** (grayscale / sepia / invert / blur / sharpen / brightness / contrast / posterize / cartoonize) and **transforms** (rotate / flip / bevel / crop), plus an eyedropper.
-- **Extract Text** (OCR → clipboard) via ocrs; **translate** any text object on-device via MADLAD-400, with a type-to-filter language picker.
+- **Extract Text** (OCR → clipboard) via ocrs, over a dragged region or the whole image.
 - **"Start Freally Snipper when I sign in"** — launch-at-login, minimized to the tray (reversible; not an OS service).
 - A **Models** panel that explains, downloads, and installs each optional model on demand, with exact-size progress (% · amount of total · MB/s).
 
 ### Changed
-- OCR / emoji / translate models **download on demand** (nothing heavy is bundled), so the app stays small; the MADLAD weights are pinned to an immutable revision.
+- OCR / emoji models **download on demand** (nothing heavy is bundled), so the app stays small.
 - Version bumped to 0.45.0 — the Phase 4 step on the ladder to v1.0.0.
 
 ## [0.30.0] — 2026-06-17 — Capture overlay action bar
@@ -106,7 +106,7 @@ The Windows-11-style home window, plus a system tray, an on-screen capture timer
 The workspace, app shell, settings store, CI matrix, and packaging scaffold.
 
 ### Added
-- Cargo workspace (`app/` + `crates/{capture,editor,asr,video}`) on a pinned stable toolchain.
+- Cargo workspace (`app/` + `crates/{capture,editor,video,timeline}`) on a pinned stable toolchain.
 - An eframe home window (900×600) with a light/dark theme toggle and an embedded icon.
 - A JSON settings store in the OS config directory that persists across runs.
 - A CI matrix (Windows/macOS/Linux): build, test, clippy `-D warnings`, and fmt.

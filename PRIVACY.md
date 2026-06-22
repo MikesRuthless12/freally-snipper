@@ -27,7 +27,7 @@ recording, and `.fvid` playback. It uses the network **only** when **you** trigg
 an optional feature whose component isn't installed yet — specifically the
 **on-demand download** of:
 
-- optional machine-learning models (e.g. OCR, translation), and
+- optional models (e.g. OCR, colour emoji), and
 - optional tools such as **ffmpeg** (used for MP4/WebM video export),
 
 fetched from their respective third-party distributors. These downloads transfer
