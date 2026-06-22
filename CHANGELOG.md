@@ -6,10 +6,16 @@ All notable changes to Freally Snipper are documented here. The format is based 
 
 ## [Unreleased]
 
-Work begins on **freally-font** — Freally's own original typeface, which will eventually replace the bundled fonts.
+Phase 6 begins — a frame-accurate **timeline video editor** for your `.fvid` recordings.
 
 ### Added
-- **freally-font** (new `crates/freally-font`) — the full **English** set (A–Z, a–z, 0–9) as 100%-original uniform-stroke glyphs, data-driven (one `.glyph` file per codepoint) with a specimen / overlay / metrics renderer for design calibration; proprietary, built from original outlines (no third-party glyph data).
+- **Timeline editor** — open a recording from Recent captures (right-click → *Edit*) or the player's *Edit* button, then: scrub frame-accurately, **play with audio**, step ±1 frame, **split**, **ripple-delete**, **drag clips to move them**, **drag a clip's edges to trim**, and tune per-clip **opacity / gain / fade-in / fade-out** — all live in a WYSIWYG preview.
+- **Export the edit** to GIF / WebM / MP4 — the timeline composites to a `.fvid` and encodes, so the export matches the preview.
+- New `crates/timeline` (**freally-timeline**) — a pure, unit-tested timeline model + compositor (no UI, no third-party deps) the editor is built on.
+- **OCR auto-orient** — Extract Text now retries sideways / upside-down selections at 90° / 180° / 270° and keeps the most readable result (only when the upright read is weak, so a normal snip still scans once).
+
+### Removed
+- The early English-only **freally-font** crate — the own-typeface effort is dropped in favour of bundling the full Noto collection + GNU Unifont (100% no-tofu coverage of every language).
 
 ## [0.60.0] — 2026-06-19 — Video capture
 

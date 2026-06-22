@@ -26,8 +26,9 @@ use crate::player::{Player, PlayerOutcome};
 use crate::print_screen::{self, KeyOutcome};
 use crate::recorder::{RecordConfig, RecordTarget, Recorder};
 use crate::settings::{
-    language_label, ImageFormat, Settings, SnippetMode, Theme, TimerDelay, UI_LANGUAGES,
+    language_native, ImageFormat, Settings, SnippetMode, Theme, TimerDelay, UI_LANGUAGES,
 };
+use crate::timeline::{TimelineEditor, TimelineOutcome};
 use crate::tray::{Tray, TrayCommand};
 use freally_editor::{EditorOutcome, EditorSession};
 
@@ -132,6 +133,8 @@ enum CaptureState {
     Recording(Box<Recording>),
     /// Playing back a saved `.fvid` recording (P5.1) in a decorated player window.
     Playing(Box<Player>),
+    /// Editing a recording on the Phase 6 timeline (P6.1) in a decorated window.
+    Timeline(Box<TimelineEditor>),
 }
 
 /// Live state for an in-progress screen recording (P5.1).
@@ -410,6 +413,9 @@ impl FreallySnipperApp {
             }
             CaptureState::Playing(_) => {
                 // The player drives its own repaints while playing.
+            }
+            CaptureState::Timeline(_) => {
+                // The timeline editor drives its own repaints while playing/exporting.
             }
         }
     }
@@ -826,13 +832,51 @@ impl FreallySnipperApp {
         }
     }
 
-    /// Draw the `.fvid` player and act on a Close request (P5.1).
+    /// Draw the `.fvid` player and act on a Close / Edit request (P5.1).
     fn player_ui(&mut self, ui: &mut egui::Ui) {
         let outcome = match &mut self.capture {
             CaptureState::Playing(player) => player.ui(ui),
             _ => return,
         };
-        if matches!(outcome, PlayerOutcome::Close) {
+        match outcome {
+            PlayerOutcome::Active => {}
+            PlayerOutcome::Close => {
+                let ctx = ui.ctx().clone();
+                self.capture = CaptureState::Idle;
+                restore_home(&ctx, self.home_pos, !self.hidden_to_tray);
+                ctx.request_repaint();
+            }
+            PlayerOutcome::Edit(path) => {
+                let ctx = ui.ctx().clone();
+                self.open_timeline(&ctx, path);
+            }
+        }
+    }
+
+    /// Open a saved `.fvid` recording in the Phase 6 timeline editor (P6.1).
+    fn open_timeline(&mut self, ctx: &egui::Context, path: PathBuf) {
+        match TimelineEditor::from_recording(ctx, path) {
+            Ok(editor) => {
+                self.home_pos = ctx
+                    .input(|i| i.viewport().outer_rect)
+                    .map(|r| r.min)
+                    .or(self.home_pos);
+                morph_to_editor(ctx);
+                self.capture = CaptureState::Timeline(Box::new(editor));
+                self.status = None;
+                ctx.request_repaint();
+            }
+            Err(message) => self.status = Some(format!("Couldn't open the editor: {message}")),
+        }
+    }
+
+    /// Draw the timeline editor and act on a Close request (P6.1).
+    fn timeline_ui(&mut self, ui: &mut egui::Ui) {
+        let outcome = match &mut self.capture {
+            CaptureState::Timeline(editor) => editor.ui(ui),
+            _ => return,
+        };
+        if matches!(outcome, TimelineOutcome::Close) {
             let ctx = ui.ctx().clone();
             self.capture = CaptureState::Idle;
             restore_home(&ctx, self.home_pos, !self.hidden_to_tray);
@@ -1075,6 +1119,7 @@ impl FreallySnipperApp {
 
         let recents = self.settings.recent_captures.clone();
         let mut to_open: Option<PathBuf> = None;
+        let mut to_edit: Option<PathBuf> = None;
         let mut to_reveal: Option<PathBuf> = None;
         let mut to_remove: Option<PathBuf> = None;
 
@@ -1091,6 +1136,10 @@ impl FreallySnipperApp {
                         tile.response.context_menu(|ui| {
                             if ui.button("Open").clicked() {
                                 to_open = Some(path.clone());
+                                ui.close();
+                            }
+                            if is_fvid(path) && ui.button("Edit (timeline)").clicked() {
+                                to_edit = Some(path.clone());
                                 ui.close();
                             }
                             if ui.button("Open folder").clicked() {
@@ -1113,6 +1162,10 @@ impl FreallySnipperApp {
             } else if let Err(err) = opener::open(&path) {
                 self.status = Some(format!("Couldn't open {}: {err}", path.display()));
             }
+        }
+        if let Some(path) = to_edit {
+            let ctx = ui.ctx().clone();
+            self.open_timeline(&ctx, path);
         }
         if let Some(path) = to_reveal {
             // Open the containing folder (default `opener::open` — no extra feature/deps).
@@ -1253,14 +1306,14 @@ impl FreallySnipperApp {
 
                         ui.label("UI language");
                         egui::ComboBox::from_id_salt("ui_language")
-                            .selected_text(language_label(&self.settings.ui_language))
+                            .selected_text(language_native(&self.settings.ui_language))
                             .show_ui(ui, |ui| {
-                                for (code, english, _native) in UI_LANGUAGES {
+                                for (code, _english, native) in UI_LANGUAGES {
                                     if ui
                                         .selectable_value(
                                             &mut self.settings.ui_language,
                                             (*code).to_owned(),
-                                            *english,
+                                            *native,
                                         )
                                         .changed()
                                     {
@@ -1622,6 +1675,8 @@ impl eframe::App for FreallySnipperApp {
             self.recording_ui(ui);
         } else if matches!(self.capture, CaptureState::Playing(_)) {
             self.player_ui(ui);
+        } else if matches!(self.capture, CaptureState::Timeline(_)) {
+            self.timeline_ui(ui);
         } else {
             self.home_ui(ui);
         }

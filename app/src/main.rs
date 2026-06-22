@@ -12,9 +12,11 @@
 
 mod app;
 mod audio;
+mod audio_out;
 mod autostart;
 mod delivery;
 mod export;
+mod fvid_reader;
 mod gallery;
 mod hotkey;
 mod output;
@@ -23,6 +25,7 @@ mod player;
 mod print_screen;
 mod recorder;
 mod settings;
+mod timeline;
 mod tray;
 mod webcam;
 

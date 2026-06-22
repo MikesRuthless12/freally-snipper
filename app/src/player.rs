@@ -35,6 +35,8 @@ pub enum PlayerOutcome {
     Active,
     /// The user closed the player — restore the home window.
     Close,
+    /// The user chose Edit — open this recording in the timeline editor (P6.1).
+    Edit(PathBuf),
 }
 
 /// Owns the streaming worker thread; stops it on drop.
@@ -212,6 +214,13 @@ impl Player {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Close").clicked() {
                         outcome = PlayerOutcome::Close;
+                    }
+                    if ui
+                        .button("✎ Edit")
+                        .on_hover_text("Open this recording in the timeline editor")
+                        .clicked()
+                    {
+                        outcome = PlayerOutcome::Edit(self.path.clone());
                     }
                     ui.add_enabled_ui(!exporting, |ui| {
                         ui.menu_button("Export ▾", |ui| {

@@ -2062,14 +2062,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "freally-font"
-version = "0.60.0"
-dependencies = [
- "ab_glyph",
- "tiny-skia",
-]
-
-[[package]]
 name = "freally-snipper"
 version = "0.60.0"
 dependencies = [
@@ -2081,6 +2073,7 @@ dependencies = [
  "ffmpeg-sidecar",
  "freally-capture",
  "freally-editor",
+ "freally-timeline",
  "freally-video",
  "global-hotkey",
  "image",
@@ -2092,6 +2085,13 @@ dependencies = [
  "tray-icon",
  "winreg",
  "winresource",
+]
+
+[[package]]
+name = "freally-timeline"
+version = "0.60.0"
+dependencies = [
+ "freally-video",
 ]
 
 [[package]]
@@ -5924,7 +5924,6 @@ dependencies = [
  "bytemuck",
  "cfg-if 1.0.4",
  "log",
- "png 0.17.16",
  "tiny-skia-path",
 ]
 
