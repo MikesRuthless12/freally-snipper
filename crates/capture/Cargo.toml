@@ -7,6 +7,11 @@ authors.workspace = true
 license-file.workspace = true
 publish = false
 
+# Internal library — not a shippable artifact; only the `freally-snipper` binary
+# is packaged by cargo-dist.
+[package.metadata.dist]
+dist = false
+
 [dependencies]
 # `xcap` re-exports the `image` crate it builds against, so downstream crates that
 # use `freally_capture::image` share the exact same `RgbaImage` type (no version skew).

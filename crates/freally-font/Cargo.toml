@@ -7,6 +7,11 @@ authors.workspace = true
 license-file.workspace = true
 publish = false
 
+# Internal tool/library — not a shippable artifact. Has a specimen-renderer
+# `main.rs`, but only the `freally-snipper` binary is packaged by cargo-dist.
+[package.metadata.dist]
+dist = false
+
 [dependencies]
 # Pure-Rust 2D rasterizer (BSD-3) — fills our *own* glyph outlines to a PNG specimen
 # for the design/refine loop. A rendering tool, not a font: no third-party glyphs.

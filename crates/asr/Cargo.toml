@@ -7,4 +7,9 @@ authors.workspace = true
 license-file.workspace = true
 publish = false
 
+# Internal library — not a shippable artifact; only the `freally-snipper` binary
+# is packaged by cargo-dist.
+[package.metadata.dist]
+dist = false
+
 [dependencies]

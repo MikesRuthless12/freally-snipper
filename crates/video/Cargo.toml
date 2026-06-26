@@ -7,6 +7,11 @@ authors.workspace = true
 license-file.workspace = true
 publish = false
 
+# Internal library — not a shippable artifact; only the `freally-snipper` binary
+# is packaged by cargo-dist.
+[package.metadata.dist]
+dist = false
+
 # Intentionally has NO dependencies: `freally-video` is built only from
 # expired-patent / public-domain techniques (a QOI-class intra codec + tile
 # delta + RLE/Huffman), so it is 100% owned and patent-safe.

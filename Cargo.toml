@@ -21,3 +21,52 @@ license-file = "LICENSE"
 opt-level = 3
 lto = "thin"
 strip = true
+
+# --- cargo-dist: 100% free per-OS installers + a free self-updater -------------
+# Replaces the old bare-binary-zip release workflow. `dist generate` writes the CI
+# (.github/workflows/release.yml) from this config. The updater (axoupdater, via
+# `install-updater = true`) verifies downloads against the SHA256 checksums in
+# dist-manifest.json over HTTPS from GitHub Releases — no paid code signing.
+[workspace.metadata.dist]
+# Generated CI is pinned to this exact dist version.
+cargo-dist-version = "0.32.0"
+# Host the release artifacts on GitHub Releases.
+ci = "github"
+# Per-OS targets we ship installers for.
+targets = [
+    "x86_64-pc-windows-msvc",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+]
+# Free installers only: shell + PowerShell one-liners, plus a Windows MSI.
+installers = ["shell", "powershell", "msi"]
+# The free self-updater (axoupdater); enables `freally-snipper-update`.
+install-updater = true
+# Auto-publish the GitHub Release (was a manual draft before).
+pr-run-mode = "plan"
+
+# Linux build needs these system libs (egui/eframe + native capture: GTK file
+# dialogs, X11/xcb, wayland, ALSA, V4L2 webcam, D-Bus, PipeWire, EGL/GBM, libclang).
+# cargo-dist installs them on the ubuntu runner before the build.
+[workspace.metadata.dist.dependencies.apt]
+pkg-config = '*'
+libgtk-3-dev = '*'
+libxcb-render0-dev = '*'
+libxcb-shape0-dev = '*'
+libxcb-xfixes0-dev = '*'
+libxcb1-dev = '*'
+libxrandr-dev = '*'
+libxkbcommon-dev = '*'
+libxkbcommon-x11-dev = '*'
+libssl-dev = '*'
+libasound2-dev = '*'
+libv4l-dev = '*'
+libdbus-1-dev = '*'
+libclang-dev = '*'
+# Quoted key: the `.3` would otherwise be parsed as a TOML sub-key and truncate
+# the package name to `libpipewire-0` (an invalid apt package).
+"libpipewire-0.3-dev" = '*'
+libwayland-dev = '*'
+libegl-dev = '*'
+libgbm-dev = '*'

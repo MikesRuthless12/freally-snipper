@@ -5,7 +5,15 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license-file.workspace = true
+# cargo-dist reads this to build the installer / self-updater download URLs that
+# point at this repo's GitHub Releases.
+repository = "https://github.com/MikesRuthless12/freally-snipper"
 publish = false
+
+# This is the ONE shippable crate. `publish = false` would otherwise hide its
+# binary from cargo-dist, so opt it in explicitly (the lib crates stay dist=false).
+[package.metadata.dist]
+dist = true
 
 [dependencies]
 freally-capture = { path = "../crates/capture" }
@@ -67,3 +75,9 @@ image editor and a light video editor for Windows, macOS, and Linux. No accounts
 telemetry.
 """
 copyright = "Copyright (c) 2026 Mike Weaver. All Rights Reserved."
+
+[package.metadata.wix]
+upgrade-guid = "EF92BF37-62A3-4200-851E-F9CFAF115845"
+path-guid = "0E9DBF87-D72C-400C-B7CB-5963F59BA272"
+license = false
+eula = false
