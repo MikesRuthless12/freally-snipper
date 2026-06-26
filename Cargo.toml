@@ -50,6 +50,21 @@ installers = ["shell", "powershell", "msi"]
 install-updater = true
 # Auto-publish the GitHub Release (was a manual draft before).
 pr-run-mode = "plan"
+# cargo-dist's auto-include mis-resolves the inherited `license-file = "LICENSE"`
+# to `../LICENSE` and the build fails with "failed to copy asset ... (os error 2)".
+# Disable auto-includes and list the doc files explicitly (workspace-root-relative).
+auto-includes = false
+include = [
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md",
+    "THIRD-PARTY-NOTICES.md",
+]
+# The linux build uses pipewire-rs 0.9.2 (libspa) for Wayland screen capture, which
+# needs a newer libspa than ubuntu-22.04/jammy ships (0.3.48 → build fails with
+# "struct spa_video_info_raw has no field flags"). Build linux on ubuntu-24.04.
+[workspace.metadata.dist.github-custom-runners]
+x86_64-unknown-linux-gnu = "ubuntu-24.04"
 
 # Linux build needs these system libs (egui/eframe + native capture: GTK file
 # dialogs, X11/xcb, wayland, ALSA, V4L2 webcam, D-Bus, PipeWire, EGL/GBM, libclang).
