@@ -1772,7 +1772,7 @@ dependencies = [
 
 [[package]]
 name = "freally-capture"
-version = "0.60.0"
+version = "0.75.0"
 dependencies = [
  "log",
  "xcap",
@@ -1780,7 +1780,7 @@ dependencies = [
 
 [[package]]
 name = "freally-editor"
-version = "0.60.0"
+version = "0.75.0"
 dependencies = [
  "ab_glyph",
  "directories",
@@ -1799,7 +1799,7 @@ dependencies = [
 
 [[package]]
 name = "freally-snipper"
-version = "0.60.0"
+version = "0.75.0"
 dependencies = [
  "arboard",
  "chrono",
@@ -1825,14 +1825,14 @@ dependencies = [
 
 [[package]]
 name = "freally-timeline"
-version = "0.60.0"
+version = "0.75.0"
 dependencies = [
  "freally-video",
 ]
 
 [[package]]
 name = "freally-video"
-version = "0.60.0"
+version = "0.75.0"
 
 [[package]]
 name = "futures-channel"
@@ -3021,9 +3021,9 @@ checksum = "88904434abc2901f197fe8cc55f0445e7ded921dba5911dad2e2b39b48e663c4"
 
 [[package]]
 name = "memmap2"
-version = "0.9.10"
+version = "0.9.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "714098028fe011992e1c3962653c96b2d578c4b4bce9036e15ff220319b1e0e3"
+checksum = "d1219ed1b7f229ee7104d281dd01d6802fe28bb6e95d292942c4daacdeb798c0"
 dependencies = [
  "libc",
 ]
