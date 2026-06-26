@@ -1,11 +1,11 @@
-//! System-font fallback (P4.9 polish) — egui-free.
+//! System-font fallback — egui-free.
 //!
 //! The bundled Noto Sans / Serif / Mono + Noto Sans Arabic cover Latin / Greek /
-//! Cyrillic + Arabic. For any other script (Indic, CJK, Thai, Hebrew, …) — most
-//! often **translated text** — we fall back to a font already installed on the
-//! user's machine that covers the glyph. Fonts are only **read at runtime** and
-//! rasterized into the saved image; none are bundled or redistributed, so offering
-//! every system font stays commercial-safe.
+//! Cyrillic + Arabic. For any other script (Indic, CJK, Thai, Hebrew, …) — e.g.
+//! **non-Latin text the user types or pastes** into a Text object — we fall back to
+//! a font already installed on the user's machine that covers the glyph. Fonts are
+//! only **read at runtime** and rasterized into the saved image; none are bundled or
+//! redistributed, so offering every system font stays commercial-safe.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};

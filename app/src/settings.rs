@@ -147,12 +147,12 @@ pub const UI_LANGUAGES: &[(&str, &str, &str)] = &[
     ("vi", "Vietnamese", "Tiếng Việt"),
 ];
 
-/// English display name for a UI-language code (falls back to the code itself).
-pub fn language_label(code: &str) -> &str {
+/// Native (endonym) display name for a UI-language code (falls back to the code itself).
+pub fn language_native(code: &str) -> &str {
     UI_LANGUAGES
         .iter()
         .find(|(c, _, _)| *c == code)
-        .map(|(_, english, _)| *english)
+        .map(|(_, _, native)| *native)
         .unwrap_or(code)
 }
 
@@ -344,9 +344,9 @@ mod tests {
     fn ui_languages_are_18_with_english_first() {
         assert_eq!(UI_LANGUAGES.len(), 18);
         assert_eq!(UI_LANGUAGES[0].0, "en");
-        // Every code resolves to its English name; an unknown code echoes back.
-        assert_eq!(language_label("ja"), "Japanese");
-        assert_eq!(language_label("zz"), "zz");
+        // Every code resolves to its native name; an unknown code echoes back.
+        assert_eq!(language_native("ja"), "日本語");
+        assert_eq!(language_native("zz"), "zz");
     }
 
     #[test]

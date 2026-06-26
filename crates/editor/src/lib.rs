@@ -15,9 +15,9 @@
 //!
 //! Still to come on the same [`EditorSession`]: text / watermark objects (P4.4),
 //! emoji (P4.7) and image (P4.8); live filters (P4.5); transforms + eyedropper +
-//! OCR (P4.6); translate-as-you-type text (P4.9). Until each lands, its toolbar
-//! button is present but disabled and labelled with the prompt that enables it —
-//! the capture bar's convention for not-yet-built features.
+//! OCR (P4.6). Until each lands, its toolbar button is present but disabled and
+//! labelled with the prompt that enables it — the capture bar's convention for
+//! not-yet-built features.
 //!
 //! The editor is drawn into the app's single OS window (morphed to a decorated
 //! editor window), matching the one-window model the capture overlay already uses.
@@ -32,29 +32,6 @@ mod ocr;
 mod raster;
 mod text;
 mod transforms;
-mod translate;
-
-/// A debounced translation request handed to the translate worker (P4.9).
-struct TranslateReq {
-    index: usize,
-    text: String,
-    target: String,
-}
-
-/// A message back from the translate worker.
-enum TranslateMsg {
-    /// The model is downloading/loading.
-    Loading,
-    /// The model finished loading and the worker is idle (clears the preload note).
-    Ready,
-    /// A translation finished (matched back to the object by index + text + target).
-    Done {
-        index: usize,
-        text: String,
-        target: String,
-        result: Result<String, String>,
-    },
-}
 
 /// Live state of a model download, shared with the Models panel (P4.11).
 enum DownloadState {
@@ -313,14 +290,6 @@ pub struct EditorSession {
     emoji_font: Option<Rc<Vec<u8>>>,
     emoji_font_rx: Option<Receiver<Result<Vec<u8>, String>>>,
     emoji_font_err: Option<String>,
-    /// Translate-as-you-type (P4.9): the worker channels, a debounced fire time +
-    /// target object, and a status line. The worker owns the loaded MADLAD model.
-    translate_tx: Option<std::sync::mpsc::Sender<TranslateReq>>,
-    translate_rx: Option<Receiver<TranslateMsg>>,
-    pending_translate: Option<(f64, usize)>,
-    translate_status: Option<String>,
-    /// One-shot guard: have we kicked off the background translator preload yet?
-    translate_preload_done: bool,
     /// Downloads / Models manager (P4.11): live per-asset download state, the
     /// exact remote sizes once probed, panel visibility, and a one-shot probe flag.
     downloads: Downloads,
@@ -399,11 +368,6 @@ impl EditorSession {
             emoji_font: None,
             emoji_font_rx: None,
             emoji_font_err: None,
-            translate_tx: None,
-            translate_rx: None,
-            pending_translate: None,
-            translate_status: None,
-            translate_preload_done: false,
             downloads: Arc::new(Mutex::new(HashMap::new())),
             model_sizes: Arc::new(Mutex::new(HashMap::new())),
             show_models: false,
@@ -491,16 +455,6 @@ impl EditorSession {
 
         // Reflect any finished OCR job.
         self.poll_ocr();
-        // Reflect finished translations + fire any debounced one (P4.9).
-        self.poll_translate();
-        self.drive_translate(ui);
-        // Preload the translator in the background once (only if its model is already
-        // downloaded), so the first translation is instant instead of a cold load.
-        if !self.translate_preload_done && models::is_installed(&models::TRANSLATE) {
-            self.translate_preload_done = true;
-            let ctx = ui.ctx().clone();
-            self.ensure_translate_worker(&ctx);
-        }
 
         let mut outcome = EditorOutcome::Active;
         egui::Panel::top("freally_toolbar2")
@@ -675,7 +629,7 @@ impl EditorSession {
             ui.separator();
             if ui
                 .button("Models…")
-                .on_hover_text("Download / manage the optional models (OCR, emoji, translate)")
+                .on_hover_text("Download / manage the optional models (OCR, emoji)")
                 .clicked()
             {
                 self.show_models = true;
@@ -854,17 +808,8 @@ impl EditorSession {
                 .add(egui::TextEdit::singleline(&mut string).desired_width(180.0))
                 .changed()
             {
-                let mut retranslate = false;
                 if let Some(t) = self.objects[i].text_mut() {
                     t.string = string;
-                    if t.target_lang.is_some() {
-                        t.translated = None; // show the source until the new translation lands
-                        retranslate = true;
-                    }
-                }
-                if retranslate {
-                    let now = ui.input(|inp| inp.time);
-                    self.schedule_translate(i, now);
                 }
             }
             ui.separator();
@@ -912,28 +857,6 @@ impl EditorSession {
                 self.objects[i].color[0] = rgb[0];
                 self.objects[i].color[1] = rgb[1];
                 self.objects[i].color[2] = rgb[2];
-            }
-
-            // Translate-as-you-type (P4.9): pick an output language; MADLAD auto-
-            // detects the typed source. Searchable so ~99+ languages stay findable.
-            ui.separator();
-            ui.label("Translate to");
-            let mut target = self.objects[i].text().and_then(|t| t.target_lang.clone());
-            if language_combo(ui, "text_translate_to", &mut target) {
-                let now = ui.input(|inp| inp.time);
-                if let Some(t) = self.objects[i].text_mut() {
-                    t.target_lang = target.clone();
-                    if target.is_none() {
-                        t.translated = None;
-                    }
-                }
-                if target.is_some() {
-                    self.schedule_translate(i, now);
-                }
-            }
-            if let Some(status) = self.translate_status.clone() {
-                ui.separator();
-                ui.weak(status);
             }
         });
     }
@@ -1257,8 +1180,6 @@ impl EditorSession {
                 font_px: self.text_px,
                 family: self.text_family,
                 size: (0, 0),
-                target_lang: None,
-                translated: None,
             }),
             a: p,
             b: p,
@@ -1848,159 +1769,6 @@ impl EditorSession {
         }
     }
 
-    /// Spawn the translate worker (once). It owns the MADLAD model and processes
-    /// requests serially; the first request triggers the download + load (P4.9).
-    fn ensure_translate_worker(&mut self, ctx: &egui::Context) {
-        if self.translate_tx.is_some() {
-            return;
-        }
-        let (req_tx, req_rx) = std::sync::mpsc::channel::<TranslateReq>();
-        let (msg_tx, msg_rx) = std::sync::mpsc::channel::<TranslateMsg>();
-        let ctx = ctx.clone();
-        let downloads = self.downloads.clone();
-        let spawned = std::thread::Builder::new()
-            .name("freally-translate".to_owned())
-            .spawn(move || {
-                // Load the model up front (preload) so the first translation is
-                // instant. From the preload path it's already downloaded (a disk
-                // read); the lazy first-use path downloads it here.
-                let _ = msg_tx.send(TranslateMsg::Loading);
-                ctx.request_repaint();
-                let reporter =
-                    download_reporter(downloads.clone(), ctx.clone(), &models::TRANSLATE);
-                let (mut engine, load_err) = match translate::Translator::load(reporter) {
-                    Ok(t) => {
-                        finish_download(&downloads, models::TRANSLATE.id, Ok(()));
-                        (Some(t), None)
-                    }
-                    Err(e) => {
-                        finish_download(&downloads, models::TRANSLATE.id, Err(e.clone()));
-                        (None, Some(e))
-                    }
-                };
-                let _ = msg_tx.send(TranslateMsg::Ready);
-                ctx.request_repaint();
-                while let Ok(req) = req_rx.recv() {
-                    // Coalesce a backlog: if the user kept typing, skip stale
-                    // requests and translate only the most recent (review #9).
-                    let mut req = req;
-                    while let Ok(newer) = req_rx.try_recv() {
-                        req = newer;
-                    }
-                    let result = match (engine.as_mut(), &load_err) {
-                        (Some(t), _) => t.translate(&req.text, &req.target),
-                        (None, Some(e)) => Err(e.clone()),
-                        _ => Err("translator unavailable".to_owned()),
-                    };
-                    let _ = msg_tx.send(TranslateMsg::Done {
-                        index: req.index,
-                        text: req.text,
-                        target: req.target,
-                        result,
-                    });
-                    ctx.request_repaint();
-                }
-            });
-        if spawned.is_ok() {
-            self.translate_tx = Some(req_tx);
-            self.translate_rx = Some(msg_rx);
-        }
-    }
-
-    /// Reflect finished translations (applied only if the object still matches).
-    fn poll_translate(&mut self) {
-        let mut msgs = Vec::new();
-        if let Some(rx) = &self.translate_rx {
-            while let Ok(m) = rx.try_recv() {
-                msgs.push(m);
-            }
-        }
-        for m in msgs {
-            match m {
-                TranslateMsg::Loading => {
-                    // Don't override an active "Translating…" with the preload note.
-                    if self.translate_status.is_none() {
-                        self.translate_status =
-                            Some("Preparing translator (loading model)…".to_owned());
-                    }
-                }
-                TranslateMsg::Ready => {
-                    // Model finished loading; clear the preload note (but not an
-                    // in-flight "Translating…").
-                    if self.translate_status.as_deref()
-                        == Some("Preparing translator (loading model)…")
-                    {
-                        self.translate_status = None;
-                    }
-                }
-                TranslateMsg::Done {
-                    index,
-                    text,
-                    target,
-                    result,
-                } => {
-                    if let Some(t) = self.objects.get_mut(index).and_then(|o| o.text_mut()) {
-                        if t.string == text && t.target_lang.as_deref() == Some(target.as_str()) {
-                            match result {
-                                Ok(translated) => {
-                                    t.translated = Some(translated);
-                                    self.translate_status = None;
-                                }
-                                Err(e) => {
-                                    self.translate_status = Some(format!("Translate failed: {e}"))
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Fire a debounced translation once its delay elapses (P4.9).
-    fn drive_translate(&mut self, ui: &egui::Ui) {
-        let Some((at, index)) = self.pending_translate else {
-            return;
-        };
-        let now = ui.input(|i| i.time);
-        if now < at {
-            ui.ctx().request_repaint(); // keep ticking until the debounce elapses
-            return;
-        }
-        self.pending_translate = None;
-        let req = self
-            .objects
-            .get(index)
-            .and_then(|o| o.text())
-            .and_then(|t| {
-                let target = t.target_lang.clone()?;
-                let text = t.string.clone();
-                if text.trim().is_empty() {
-                    None
-                } else {
-                    Some(TranslateReq {
-                        index,
-                        text,
-                        target,
-                    })
-                }
-            });
-        if let Some(req) = req {
-            let ctx = ui.ctx().clone();
-            self.ensure_translate_worker(&ctx);
-            if let Some(tx) = &self.translate_tx {
-                let _ = tx.send(req);
-                self.translate_status = Some("Translating…".to_owned());
-                ctx.request_repaint();
-            }
-        }
-    }
-
-    /// Schedule a debounced re-translation of object `index` (P4.9).
-    fn schedule_translate(&mut self, index: usize, now: f64) {
-        self.pending_translate = Some((now + 0.7, index));
-    }
-
     /// Pre-download an asset from the Models panel (P4.11), off the UI thread.
     fn start_model_download(&mut self, asset: &'static models::Asset, ctx: &egui::Context) {
         if let Ok(map) = self.downloads.lock() {
@@ -2492,81 +2260,6 @@ fn family_combo(ui: &mut egui::Ui, id: &str, family: &mut FontFamily) -> bool {
         .show_ui(ui, |ui| {
             for f in FontFamily::ALL {
                 changed |= ui.selectable_value(family, f, f.label()).changed();
-            }
-        });
-    changed
-}
-
-/// A searchable (type-to-filter) language picker (P4.9). `selected` is the chosen
-/// MADLAD target code, or `None` for "off / no translation". Returns true if it
-/// changed. Built as a manual popup (not a plain `ComboBox`) so typing in the
-/// search box doesn't close it — scales to ~99+ languages: start typing to jump.
-fn language_combo(ui: &mut egui::Ui, id: &str, selected: &mut Option<String>) -> bool {
-    let mut changed = false;
-    let popup_id = egui::Id::new(id).with("popup");
-    let filter_id = egui::Id::new(id).with("filter");
-    let focused_id = egui::Id::new(id).with("focused");
-    let current = selected
-        .as_deref()
-        .map(translate::target_label)
-        .unwrap_or("Off");
-    // A plain button (no arrow glyph — those tofu in egui's bundled fonts); the
-    // "Translate to" label precedes it, so it reads as a picker.
-    let button = ui.button(current);
-    if button.clicked() {
-        ui.memory_mut(|m| {
-            m.data.insert_temp(filter_id, String::new()); // fresh search each open
-            m.data.insert_temp(focused_id, false); // re-focus the search box on open
-        });
-    }
-    egui::Popup::menu(&button)
-        .id(popup_id)
-        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-        .show(|ui| {
-            ui.set_min_width(210.0);
-            let mut filter = ui
-                .memory(|m| m.data.get_temp::<String>(filter_id))
-                .unwrap_or_default();
-            let search = ui.add(
-                egui::TextEdit::singleline(&mut filter)
-                    .hint_text("Type to filter…")
-                    .desired_width(190.0),
-            );
-            // Focus the search box once, the frame the popup opens (review #16).
-            if !ui.memory(|m| m.data.get_temp::<bool>(focused_id).unwrap_or(false)) {
-                search.request_focus();
-                ui.memory_mut(|m| m.data.insert_temp(focused_id, true));
-            }
-            ui.memory_mut(|m| m.data.insert_temp(filter_id, filter.clone()));
-            ui.separator();
-            let q = filter.trim().to_lowercase();
-            egui::ScrollArea::vertical()
-                .max_height(240.0)
-                .show(ui, |ui| {
-                    if q.is_empty()
-                        && ui
-                            .selectable_label(selected.is_none(), "Off (no translation)")
-                            .clicked()
-                    {
-                        *selected = None;
-                        changed = true;
-                    }
-                    for (code, name) in translate::TARGETS {
-                        let matches = q.is_empty()
-                            || name.to_lowercase().contains(&q)
-                            || code.to_lowercase().contains(&q);
-                        if matches
-                            && ui
-                                .selectable_label(selected.as_deref() == Some(*code), *name)
-                                .clicked()
-                        {
-                            *selected = Some((*code).to_owned());
-                            changed = true;
-                        }
-                    }
-                });
-            if changed {
-                egui::Popup::close_id(ui.ctx(), popup_id);
             }
         });
     changed

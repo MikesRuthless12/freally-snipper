@@ -1,0 +1,14 @@
+[package]
+name = "freally-timeline"
+description = "freally-timeline — the pure, UI-free timeline model + compositor for the Freally Snipper video editor (Phase 6)."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish = false
+
+# Depends only on the owned codec for its frame/audio/timing types — no egui, no
+# I/O, no third-party crates. The model is pure data + a deterministic compositor,
+# so it is fully unit-testable headless (the codec's test-heavy, UI-free pattern).
+[dependencies]
+freally-video = { path = "../video" }

@@ -3,18 +3,59 @@
 //! Uses **`ocrs` + `rten`** (MIT) — no Tesseract C++ system deps. The detection +
 //! recognition models are **downloaded on demand** (see [`crate::models`]) and run
 //! off the UI thread; the `on_progress` callback drives the download UI (P4.11).
+//!
+//! [`extract_text_auto_orient`] adds the P5 **auto-orient** polish: if the upright
+//! pass reads poorly (sideways / upside-down text), it re-runs OCR at 90° / 180° /
+//! 270° and keeps the most readable result — all local, no cloud.
 
-use freally_capture::image::RgbaImage;
+use freally_capture::image::{imageops, RgbaImage};
 
 use crate::download::Progress;
 use crate::models;
 
-/// Extract text from `image` (the whole raster). Downloads the models on first use,
-/// reporting download progress via `on_progress`. **Blocking + slow** — worker only.
+/// Recognized word-characters above which the upright pass is trusted and the
+/// rotations are skipped — the common, already-upright snip (so OCR runs once).
+const CONFIDENT_SCORE: usize = 6;
+
+/// Extract text from `image` (the whole raster), **auto-orienting** it: if the
+/// upright pass reads poorly (sideways/upside-down text), retry at 90° / 180° /
+/// 270° and keep the most readable result. The extra passes run **only** when the
+/// upright read is weak, so a normal upright snip still costs a single OCR pass.
+/// Downloads the models on first use, reporting progress via `on_progress`.
+/// **Blocking + slow** — worker only.
 pub fn extract_text(
     image: &RgbaImage,
     on_progress: impl FnMut(usize, Progress),
 ) -> Result<String, String> {
+    let engine = build_engine(on_progress)?;
+
+    let upright = run_ocr(&engine, image)?;
+    let mut best_score = readability_score(&upright);
+    if best_score >= CONFIDENT_SCORE {
+        return Ok(upright); // already reads well — no rotation needed
+    }
+
+    // The selection may be rotated: try each turn and keep the best-scoring read.
+    let mut best_text = upright;
+    for angle in [90u32, 180, 270] {
+        let rotated = match angle {
+            90 => imageops::rotate90(image),
+            180 => imageops::rotate180(image),
+            _ => imageops::rotate270(image),
+        };
+        if let Ok(text) = run_ocr(&engine, &rotated) {
+            let score = readability_score(&text);
+            if score > best_score {
+                best_score = score;
+                best_text = text;
+            }
+        }
+    }
+    Ok(best_text)
+}
+
+/// Load the OCR models (downloading on first use) and build the engine.
+fn build_engine(on_progress: impl FnMut(usize, Progress)) -> Result<ocrs::OcrEngine, String> {
     // `paths` is in `OCR.files` order: [detection, recognition].
     let paths = models::ensure(&models::OCR, on_progress)?;
     let detection_model =
@@ -22,13 +63,16 @@ pub fn extract_text(
     let recognition_model =
         rten::Model::load_file(&paths[1]).map_err(|e| format!("load recognition model: {e}"))?;
 
-    let engine = ocrs::OcrEngine::new(ocrs::OcrEngineParams {
+    ocrs::OcrEngine::new(ocrs::OcrEngineParams {
         detection_model: Some(detection_model),
         recognition_model: Some(recognition_model),
         ..Default::default()
     })
-    .map_err(|e| format!("init OCR engine: {e}"))?;
+    .map_err(|e| format!("init OCR engine: {e}"))
+}
 
+/// Run one OCR pass over `image` with an already-built `engine`.
+fn run_ocr(engine: &ocrs::OcrEngine, image: &RgbaImage) -> Result<String, String> {
     // Flatten over opaque white (so transparent capture regions can't feed noise to
     // the recognizer) and hand ocrs 3-channel RGB — its documented input format.
     let (w, h) = (image.width(), image.height());
@@ -49,11 +93,39 @@ pub fn extract_text(
         .map_err(|e| format!("recognize text: {e}"))
 }
 
+/// A crude readability score: the count of word-characters in tokens that are
+/// mostly alphanumeric. Correctly-oriented text reads as many real word-characters;
+/// a wrong orientation yields few characters / mostly symbol noise (scored 0), so a
+/// higher score reliably picks the right turn.
+fn readability_score(text: &str) -> usize {
+    text.split_whitespace()
+        .map(|word| {
+            let total = word.chars().count();
+            let alnum = word.chars().filter(|c| c.is_alphanumeric()).count();
+            // Discount symbol-heavy garbage tokens; reward clean, longer words.
+            if alnum * 2 >= total {
+                alnum
+            } else {
+                0
+            }
+        })
+        .sum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::text::{self, FontFamily};
     use freally_capture::image::{Rgba, RgbaImage};
+
+    #[test]
+    fn readability_prefers_real_words_over_symbol_noise() {
+        assert!(readability_score("Hello world 123") > readability_score("|~ ^^ <> #@"));
+        assert_eq!(readability_score(""), 0);
+        assert_eq!(readability_score("   \n  "), 0);
+        // A single short word should still clear the symbol-noise floor.
+        assert!(readability_score("Login") >= 5);
+    }
 
     /// Diagnostic: confirm the OCR pipeline (models + rten + decode) reads clean,
     /// upright black-on-white text. Ignored by default — it needs the OCR models in

@@ -71,7 +71,7 @@ pub fn render(text: &str, font_px: f32, family: FontFamily, color: [u8; 4]) -> O
         let rtl = is_rtl(line);
         let primary = if rtl { ARABIC } else { family.bytes() };
         // Fall back to an installed system font for scripts the bundled fonts don't
-        // cover (e.g. translated Tamil / Telugu / Thai / Hebrew / CJK).
+        // cover (e.g. typed Tamil / Telugu / Thai / Hebrew / CJK).
         let (bytes, index) = font_for_line(primary, line);
         let (Some(face), Ok(ab)) = (
             Face::from_slice(bytes, index),
@@ -160,7 +160,7 @@ pub fn render(text: &str, font_px: f32, family: FontFamily, color: [u8; 4]) -> O
 
 /// The font (bytes + face index) to render `line` with: the `primary` bundled font
 /// if it covers every character, otherwise an installed system font that covers the
-/// first uncovered one (so translated Indic / Thai / Hebrew / CJK text isn't tofu).
+/// first uncovered one (so typed Indic / Thai / Hebrew / CJK text isn't tofu).
 fn font_for_line(primary: &'static [u8], line: &str) -> (&'static [u8], u32) {
     let Ok(font) = FontRef::try_from_slice(primary) else {
         return (primary, 0);

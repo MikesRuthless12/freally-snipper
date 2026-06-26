@@ -27,8 +27,8 @@ freally-capture = { path = "../capture" }
 rustybuzz = "0.20"
 ab_glyph = "0.2"
 # System-font fallback: render scripts the bundled Noto fonts don't cover (Indic /
-# CJK / Thai / Hebrew …, e.g. translated text) using a font already installed on the
-# user's machine. `fontdb` (MIT/Apache) only *reads* installed fonts at runtime and
+# CJK / Thai / Hebrew …, e.g. non-Latin text the user types) using a font already
+# installed on the user's machine. `fontdb` (MIT/Apache) only *reads* fonts at runtime and
 # we rasterize into the saved image — fonts are never bundled or redistributed, so
 # this stays commercial-safe.
 fontdb = "0.18"
@@ -57,12 +57,3 @@ directories = "6"
 # dropped as an Image object (reuses P4.8 placement/resize/bake).
 swash = "0.2"
 emojis = "0.8"
-# Translate-as-you-type (P4.9): MADLAD-400 (Apache-2.0) is a T5 model → run it
-# locally on CPU via candle (pure-Rust ML, MIT/Apache). Weights + tokenizer
-# download on demand (~3 GB), not bundled. `tokenizers` (Apache) does the
-# SentencePiece tokenization.
-candle-core = "0.10"
-candle-nn = "0.10"
-candle-transformers = "0.10"
-tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
-serde_json = "1"

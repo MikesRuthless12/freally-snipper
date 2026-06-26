@@ -2,8 +2,8 @@
 
 Freally Snipper is proprietary software (© 2026 Mike Weaver — All Rights Reserved; see
 [`LICENSE`](LICENSE)). Protecting your data is a core design goal: the app is **local-first and
-offline by default** — capture, editing, and the optional transcription/translation/dubbing all run
-**on your machine**, with **no accounts, no cloud, and no telemetry**.
+offline by default** — capture and editing all run **on your machine**, with **no accounts, no
+cloud, and no telemetry**.
 
 ## Supported versions
 
@@ -29,7 +29,7 @@ remediate before any public disclosure.
 ## Scope & notes
 
 - **Local-first:** the core never transmits your data. The only network actions are *optional and
-  explicit* — model downloads (Whisper / translation / TTS) and user-initiated "Share"/export.
+  explicit* — model downloads (OCR / colour-emoji) and user-initiated "Share"/export.
 - **Capture surface (Phase 1):** screen capture, the clipboard copy, and the saved image file all
   stay **on your machine**. Captures are written only to the folder you choose (default
   `Pictures/Freally Snipper`); filenames are program-generated (no path-traversal input). The
@@ -50,17 +50,14 @@ remediate before any public disclosure.
   (no path-traversal input). The **Video** and **Text Extractor (OCR)** buttons are inert
   placeholders (no capture, no recognition, no network) until their phases land. No new dependencies
   were added, and the app stays `#![forbid(unsafe_code)]`.
-- **Image editor (Phase 4):** all editing — markup, text, shapes, emoji, filters, transforms, OCR,
-  and translation — runs **locally and in-memory**; nothing is uploaded. The only network actions are
-  **optional, explicit model downloads** for the OCR (ocrs), colour-emoji (Noto Color Emoji), and
-  translation (MADLAD-400) add-ons, fetched on first use (or from the in-app **Models** panel) into
-  your per-user cache. **Integrity:** downloads are over **TLS** from fixed, hardcoded hosts; target
-  filenames are **hardcoded literals** (no path-traversal input); each file is streamed to a temp path
-  and **atomically renamed**; the ~3 GB **MADLAD weights are pinned to an immutable revision** so they
-  can't silently change. **Tracked hardening:** per-file **SHA-256 pinning** — TLS authenticates the
-  host, not the bytes. The translate add-on loads weights via one **`unsafe` memory-map** (required by
-  `candle`) of a file the app just wrote into its own cache; the rest of the editor crate, and the
-  whole app binary, remain `#![forbid(unsafe_code)]`.
+- **Image editor (Phase 4):** all editing — markup, text, shapes, emoji, filters, transforms, and
+  OCR — runs **locally and in-memory**; nothing is uploaded. The only network actions are
+  **optional, explicit model downloads** for the OCR (ocrs) and colour-emoji (Noto Color Emoji)
+  add-ons, fetched on first use (or from the in-app **Models** panel) into your per-user cache.
+  **Integrity:** downloads are over **TLS** from fixed, hardcoded hosts; target filenames are
+  **hardcoded literals** (no path-traversal input); each file is streamed to a temp path and
+  **atomically renamed**. **Tracked hardening:** per-file **SHA-256 pinning** — TLS authenticates the
+  host, not the bytes.
 - **Video capture (Phase 5):** screen recording, the recorded `.fvid` file, and the optional
   **system-audio / microphone / webcam** capture all stay **on your machine** — nothing is uploaded.
   Microphone and webcam capture are **opt-in** (off by default) and used only to produce your

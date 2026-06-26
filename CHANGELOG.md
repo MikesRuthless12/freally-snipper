@@ -6,10 +6,16 @@ All notable changes to Freally Snipper are documented here. The format is based 
 
 ## [Unreleased]
 
-Work begins on **freally-font** — Freally's own original typeface, which will eventually replace the bundled fonts.
+Phase 6 begins — a frame-accurate **timeline video editor** for your `.fvid` recordings.
 
 ### Added
-- **freally-font** (new `crates/freally-font`) — the full **English** set (A–Z, a–z, 0–9) as 100%-original uniform-stroke glyphs, data-driven (one `.glyph` file per codepoint) with a specimen / overlay / metrics renderer for design calibration; proprietary, built from original outlines (no third-party glyph data).
+- **Timeline editor** — open a recording from Recent captures (right-click → *Edit*) or the player's *Edit* button, then: scrub frame-accurately, **play with audio**, step ±1 frame, **split**, **ripple-delete**, **drag clips to move them**, **drag a clip's edges to trim**, and tune per-clip **opacity / gain / fade-in / fade-out** — all live in a WYSIWYG preview.
+- **Export the edit** to GIF / WebM / MP4 — the timeline composites to a `.fvid` and encodes, so the export matches the preview.
+- New `crates/timeline` (**freally-timeline**) — a pure, unit-tested timeline model + compositor (no UI, no third-party deps) the editor is built on.
+- **OCR auto-orient** — Extract Text now retries sideways / upside-down selections at 90° / 180° / 270° and keeps the most readable result (only when the upright read is weak, so a normal snip still scans once).
+
+### Removed
+- The early English-only **freally-font** crate — the own-typeface effort is dropped in favour of bundling the full Noto collection + GNU Unifont (100% no-tofu coverage of every language).
 
 ## [0.60.0] — 2026-06-19 — Video capture
 
@@ -34,7 +40,7 @@ Screen recording to the owned `freally-video` format — with audio, an optional
 
 ## [0.45.0] — 2026-06-17 — Image editor (Toolbar 2)
 
-A full WYSIWYG image editor — markup, text, shapes, emoji, filters, transforms, image-on-image, OCR, and on-device translation — plus start-at-login and an in-app model downloader.
+A full WYSIWYG image editor — markup, text, shapes, emoji, filters, transforms, image-on-image, and OCR — plus start-at-login and an in-app model downloader.
 
 ### Added
 - The editor opens in its own window on a zoom/pan canvas; **Save writes exactly what you see** (Save / Copy / Discard, Undo / Redo).
@@ -42,12 +48,12 @@ A full WYSIWYG image editor — markup, text, shapes, emoji, filters, transforms
 - Movable objects: rectangles / ovals / lines / arrows, **text + watermark** (size / font / opacity / colour), placed **image files**, and colour **emoji** — all selected, dragged, resized, and flattened only on Save.
 - Text shapes via rustybuzz + bundled Noto (incl. Arabic RTL); colour emoji via swash + Noto Color Emoji.
 - Live **filters** (grayscale / sepia / invert / blur / sharpen / brightness / contrast / posterize / cartoonize) and **transforms** (rotate / flip / bevel / crop), plus an eyedropper.
-- **Extract Text** (OCR → clipboard) via ocrs; **translate** any text object on-device via MADLAD-400, with a type-to-filter language picker.
+- **Extract Text** (OCR → clipboard) via ocrs, over a dragged region or the whole image.
 - **"Start Freally Snipper when I sign in"** — launch-at-login, minimized to the tray (reversible; not an OS service).
 - A **Models** panel that explains, downloads, and installs each optional model on demand, with exact-size progress (% · amount of total · MB/s).
 
 ### Changed
-- OCR / emoji / translate models **download on demand** (nothing heavy is bundled), so the app stays small; the MADLAD weights are pinned to an immutable revision.
+- OCR / emoji models **download on demand** (nothing heavy is bundled), so the app stays small.
 - Version bumped to 0.45.0 — the Phase 4 step on the ladder to v1.0.0.
 
 ## [0.30.0] — 2026-06-17 — Capture overlay action bar
@@ -100,7 +106,7 @@ The Windows-11-style home window, plus a system tray, an on-screen capture timer
 The workspace, app shell, settings store, CI matrix, and packaging scaffold.
 
 ### Added
-- Cargo workspace (`app/` + `crates/{capture,editor,asr,video}`) on a pinned stable toolchain.
+- Cargo workspace (`app/` + `crates/{capture,editor,video,timeline}`) on a pinned stable toolchain.
 - An eframe home window (900×600) with a light/dark theme toggle and an embedded icon.
 - A JSON settings store in the OS config directory that persists across runs.
 - A CI matrix (Windows/macOS/Linux): build, test, clippy `-D warnings`, and fmt.

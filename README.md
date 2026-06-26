@@ -14,10 +14,9 @@ telemetry).
 > overlay, the Phase 2 home window, the Phase 1 capture core, and the Phase 0 foundation.
 
 > **🔒 No bundled AI models — full transparency.** Capture and image/video editing work **100%
-> offline**. The **optional** speech-to-text, translation, and dubbing features use third-party AI
-> models (Whisper, M2M-100, Piper, …) that are **NOT bundled or redistributed** with Freally Snipper.
-> When *you choose* to enable one of those features, the app **downloads the model you pick, on
-> demand** (or lets you point it at one you already have) — and shows you exactly what it fetches.
+> offline**. The **optional** OCR ("Extract Text") and colour-emoji features use third-party models
+> that are **NOT bundled or redistributed** with Freally Snipper. When *you choose* to enable one of
+> those features, the app **downloads it on demand** — and shows you exactly what it fetches.
 > Nothing is downloaded or sent anywhere otherwise. See [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
 
 ## License (important)
@@ -86,9 +85,9 @@ exactly what you see** (Save / Copy / Discard, Undo / Redo):
 - **Draw** — pen, brush, highlighter (free or text-aware), and a two-mode eraser, each with an adjustable size.
 - **Objects** — rectangles / ovals / lines / arrows, **text** + **watermark** (size / font / opacity / colour), placed **image files**, and colour **emoji** — moved, resized, and flattened only on Save.
 - **Filters & transforms** — grayscale / sepia / invert / blur / sharpen / brightness / contrast / posterize / cartoonize, and rotate / flip / bevel / crop, plus an eyedropper.
-- **Extract Text** (OCR → clipboard) and **translate** any text object on-device into ~400 languages, with a type-to-filter language picker.
+- **Extract Text** (OCR → clipboard) from any image region or the whole image.
 
-The OCR, colour-emoji, and translation models aren't bundled — the **Models** panel downloads each on
+The OCR and colour-emoji models aren't bundled — the **Models** panel downloads each on
 demand with a live progress bar (% · amount of total · MB/s). See
 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
 
@@ -172,7 +171,7 @@ Publish it via **Settings → Pages → Deploy from a branch → `main` / `docs`
 │   ├── capture/         # `freally-capture` — screen capture           (Phase 1)
 │   ├── editor/          # `freally-editor`  — image editor             (Phase 4)
 │   ├── freally-font/    # `freally-font`    — Freally's own typeface (English; in progress) (Phase 4b)
-│   ├── asr/             # `freally-asr`     — optional local speech-to-text (Phase 6)
+│   ├── timeline/        # `freally-timeline`— video timeline editor       (Phase 6)
 │   └── video/           # `freally-video`   — owned video codec + editor   (Phase 5/6)
 └── .github/workflows/ci.yml
 ```
